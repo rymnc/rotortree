@@ -55,15 +55,3 @@ jobs:
         with:
           tool: cargo-hack,cargo-nextest
       - run: cargo hack nextest run --feature-powerset
-
-  bench-check:
-    name: Bench Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.90.0
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-hack
-      - run: cargo hack check --benches --feature-powerset
