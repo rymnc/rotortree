@@ -1,0 +1,54 @@
+[package]
+name = "rotortree"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.90.0"
+
+[features]
+default = ["blake3"]
+blake3 = ["dep:blake3"]
+wincode = ["dep:wincode"]
+std = ["blake3?/std", "wincode?/std"]
+concurrent = ["std", "dep:parking_lot", "dep:arc-swap"]
+parallel = ["std", "dep:rayon"]
+storage = ["std", "dep:parking_lot", "dep:arc-swap", "wincode", "dep:crc32c", "dep:fs2"]
+
+[dependencies]
+blake3 = { version = "1", default-features = false, optional = true }
+wincode = { version = "0.4", default-features = false, features = ["alloc", "derive"], optional = true }
+parking_lot = { version = "0.12", optional = true }
+arc-swap = { version = "1", optional = true }
+rayon = { version = "1", optional = true }
+crc32c = { version = "0.6", optional = true }
+fs2 = { version = "0.4", optional = true }
+
+[dev-dependencies]
+proptest = "1"
+divan = "0.1"
+crabtime = "1.1.4"
+tempfile = "3"
+
+[[bench]]
+name = "tree_bench"
+harness = false
+
+[[bench]]
+name = "tree_bench_concurrent"
+harness = false
+required-features = ["concurrent"]
+
+[[bench]]
+name = "tree_bench_parallel"
+harness = false
+required-features = ["parallel"]
+
+[[bench]]
+name = "tree_bench_all"
+harness = false
+required-features = ["concurrent", "parallel"]
+
+[[bench]]
+name = "tree_bench_storage"
+harness = false
+required-features = ["storage"]

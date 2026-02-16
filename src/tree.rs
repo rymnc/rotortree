@@ -1,0 +1,1264 @@
+#[cfg(not(feature = "std"))]
+use alloc::{
+    sync::Arc,
+    vec::Vec,
+};
+#[cfg(feature = "std")]
+use std::{
+    sync::Arc,
+    vec::Vec,
+};
+
+use crate::{
+    Hash,
+    Hasher,
+    TreeError,
+};
+
+/// Number of hashes per chunk for structural sharing.
+const CHUNK_SIZE: usize = 128;
+
+/// Returns the number of hash layers above the leaf level.
+///
+/// - `size <= 1` → 0 (root IS the leaf or tree is empty)
+/// - `size == N` → 1
+/// - `size == N^k` → k
+#[allow(clippy::arithmetic_side_effects)]
+#[inline(always)]
+fn ceil_log_n(size: u64, n: usize) -> usize {
+    if size <= 1 {
+        return 0;
+    }
+    if n.is_power_of_two() {
+        let k = n.trailing_zeros();
+        let bits = u64::BITS - (size - 1).leading_zeros();
+        return bits.div_ceil(k) as usize;
+    }
+    (size - 1).ilog(n as u64) as usize + 1
+}
+
+/// Convert `u64` to `usize`, returning `CapacityExceeded` on
+/// failure (relevant on 32-bit platforms).
+fn u64_to_usize(val: u64) -> Result<usize, TreeError> {
+    usize::try_from(val).map_err(|_| TreeError::CapacityExceeded)
+}
+
+/// A single level of the tree stored as fixed-size chunks plus a
+/// fixed-size tail buffer.
+///
+/// Completed chunks are `Arc`-wrapped for zero-copy sharing with
+/// snapshots
+#[derive(Clone)]
+struct ChunkedLevel {
+    /// Immutable completed chunks, shared across snapshots.
+    chunks: Vec<Arc<[Hash; CHUNK_SIZE]>>,
+    /// Fixed-size tail buffer (partially filled).
+    tail: [Hash; CHUNK_SIZE],
+    /// Number of valid entries in `tail`.
+    tail_len: usize,
+    /// Total number of hashes in this level.
+    len: usize,
+}
+
+impl ChunkedLevel {
+    fn new() -> Self {
+        Self {
+            chunks: Vec::new(),
+            tail: [[0u8; 32]; CHUNK_SIZE],
+            tail_len: 0,
+            len: 0,
+        }
+    }
+
+    /// Read a hash at the given index.
+    fn get(&self, index: usize) -> Result<Hash, TreeError> {
+        let chunk_idx = index.checked_div(CHUNK_SIZE).ok_or(TreeError::MathError)?;
+        let offset = index.checked_rem(CHUNK_SIZE).ok_or(TreeError::MathError)?;
+        if chunk_idx < self.chunks.len() {
+            Ok(self.chunks[chunk_idx][offset])
+        } else {
+            Ok(self.tail[offset])
+        }
+    }
+
+    /// Write a hash at the given index
+    fn set(&mut self, index: usize, value: Hash) -> Result<(), TreeError> {
+        while self.len <= index {
+            self.push([0u8; 32])?;
+        }
+        let chunk_idx = index.checked_div(CHUNK_SIZE).ok_or(TreeError::MathError)?;
+        let offset = index.checked_rem(CHUNK_SIZE).ok_or(TreeError::MathError)?;
+        if chunk_idx < self.chunks.len() {
+            let chunk = Arc::make_mut(&mut self.chunks[chunk_idx]);
+            chunk[offset] = value;
+        } else {
+            self.tail[offset] = value;
+        }
+        Ok(())
+    }
+
+    /// Append a hash. Promotes the tail when it reaches
+    /// `CHUNK_SIZE`.
+    fn push(&mut self, value: Hash) -> Result<(), TreeError> {
+        self.tail[self.tail_len] = value;
+        self.tail_len = self.tail_len.checked_add(1).ok_or(TreeError::MathError)?;
+        self.len = self.len.checked_add(1).ok_or(TreeError::MathError)?;
+        if self.tail_len == CHUNK_SIZE {
+            self.promote_tail();
+        }
+        Ok(())
+    }
+
+    /// Append a slice of hashes.
+    fn extend(&mut self, values: &[Hash]) -> Result<(), TreeError> {
+        for &v in values {
+            self.push(v)?;
+        }
+        Ok(())
+    }
+
+    /// Promote the full tail into a chunk.
+    fn promote_tail(&mut self) {
+        debug_assert_eq!(self.tail_len, CHUNK_SIZE);
+        self.chunks.push(Arc::new(self.tail));
+        self.tail = [[0u8; 32]; CHUNK_SIZE];
+        self.tail_len = 0;
+    }
+
+    /// Create a snapshot level
+    fn snapshot(&self) -> SnapshotLevel {
+        SnapshotLevel {
+            chunks: self.chunks.clone(),
+            tail: self.tail,
+            len: self.len,
+        }
+    }
+}
+
+/// Immutable view of a single tree level for proof generation.
+pub(crate) struct SnapshotLevel {
+    chunks: Vec<Arc<[Hash; CHUNK_SIZE]>>,
+    tail: [Hash; CHUNK_SIZE],
+    len: usize,
+}
+
+impl SnapshotLevel {
+    const EMPTY: Self = Self {
+        chunks: Vec::new(),
+        tail: [[0u8; 32]; CHUNK_SIZE],
+        len: 0,
+    };
+
+    pub(crate) fn get(&self, index: usize) -> Result<Hash, TreeError> {
+        let chunk_idx = index.checked_div(CHUNK_SIZE).ok_or(TreeError::MathError)?;
+        let offset = index.checked_rem(CHUNK_SIZE).ok_or(TreeError::MathError)?;
+        if chunk_idx < self.chunks.len() {
+            Ok(self.chunks[chunk_idx][offset])
+        } else {
+            Ok(self.tail[offset])
+        }
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+}
+
+/// Immutable snapshot of the tree for lock-free reads and proof
+/// generation.
+pub struct TreeSnapshot<const N: usize, const MAX_DEPTH: usize> {
+    pub(crate) levels: [SnapshotLevel; MAX_DEPTH],
+    pub(crate) root: Option<Hash>,
+    pub(crate) size: u64,
+    pub(crate) depth: usize,
+}
+
+impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
+    /// The Merkle root, or `None` if the tree is empty.
+    pub fn root(&self) -> Option<Hash> {
+        self.root
+    }
+
+    /// Number of leaves in the snapshot.
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Current depth (hash layers above the leaf level).
+    pub fn depth(&self) -> usize {
+        self.depth
+    }
+}
+
+/// Mutable tree state.
+pub(crate) struct TreeInner<const N: usize, const MAX_DEPTH: usize> {
+    /// Levels 0..depth-1
+    levels: [ChunkedLevel; MAX_DEPTH],
+    /// The root hash
+    pub(crate) root: Option<Hash>,
+    pub(crate) size: u64,
+    pub(crate) depth: usize,
+}
+
+impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
+    pub(crate) fn new() -> Self {
+        Self {
+            levels: core::array::from_fn(|_| ChunkedLevel::new()),
+            root: None,
+            size: 0,
+            depth: 0,
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> TreeSnapshot<N, MAX_DEPTH> {
+        let mut levels = [const { SnapshotLevel::EMPTY }; MAX_DEPTH];
+        let snap_count = core::cmp::min(self.depth.saturating_add(1), MAX_DEPTH);
+        for (dst, src) in levels.iter_mut().zip(self.levels.iter()).take(snap_count) {
+            *dst = src.snapshot();
+        }
+        TreeSnapshot {
+            levels,
+            root: self.root,
+            size: self.size,
+            depth: self.depth,
+        }
+    }
+}
+
+/// An N-ary Lean Incremental Merkle Tree.
+///
+/// # Type Parameters
+///
+/// - `H`: Hash function ([`Hasher`])
+/// - `N`: Branching factor (compile-time, must be >= 2)
+/// - `MAX_DEPTH`: Maximum tree depth (must be >= 1)
+pub struct LeanIMT<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
+    hasher: H,
+    #[cfg(not(feature = "concurrent"))]
+    inner: TreeInner<N, MAX_DEPTH>,
+    #[cfg(feature = "concurrent")]
+    inner: parking_lot::Mutex<TreeInner<N, MAX_DEPTH>>,
+    #[cfg(feature = "concurrent")]
+    snapshot: arc_swap::ArcSwap<TreeSnapshot<N, MAX_DEPTH>>,
+}
+
+impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH> {
+    const _ASSERT_N: () = assert!(N >= 2, "branching factor must be at least 2");
+    const _ASSERT_DEPTH: () = assert!(MAX_DEPTH >= 1, "max depth must be at least 1");
+
+    /// Create a new empty tree.
+    #[cfg(not(feature = "concurrent"))]
+    pub fn new(hasher: H) -> Self {
+        let () = Self::_ASSERT_N;
+        let () = Self::_ASSERT_DEPTH;
+        Self {
+            hasher,
+            inner: TreeInner::new(),
+        }
+    }
+
+    /// Create a new empty tree
+    #[cfg(feature = "concurrent")]
+    pub fn new(hasher: H) -> Self {
+        let () = Self::_ASSERT_N;
+        let () = Self::_ASSERT_DEPTH;
+        let inner = TreeInner::new();
+        let snap = inner.snapshot();
+        Self {
+            hasher,
+            inner: parking_lot::Mutex::new(inner),
+            snapshot: arc_swap::ArcSwap::from_pointee(snap),
+        }
+    }
+
+    /// Insert a single leaf. Returns the new Merkle root.
+    #[cfg(not(feature = "concurrent"))]
+    pub fn insert(&mut self, leaf: Hash) -> Result<Hash, TreeError> {
+        Self::_insert(&mut self.inner, &self.hasher, leaf)
+    }
+
+    /// Insert a single leaf. Returns the new Merkle root.
+    #[cfg(feature = "concurrent")]
+    pub fn insert(&self, leaf: Hash) -> Result<Hash, TreeError> {
+        let mut inner = self.inner.lock();
+        let root = Self::_insert(&mut inner, &self.hasher, leaf)?;
+        let snap = inner.snapshot();
+        self.snapshot.store(Arc::new(snap));
+        Ok(root)
+    }
+
+    /// Insert multiple leaves in a batch. Returns the new root.
+    #[cfg(not(feature = "concurrent"))]
+    pub fn insert_many(&mut self, leaves: &[Hash]) -> Result<Hash, TreeError> {
+        Self::_insert_many(&mut self.inner, &self.hasher, leaves)
+    }
+
+    /// Insert multiple leaves in a batch. Returns the new root.
+    #[cfg(feature = "concurrent")]
+    pub fn insert_many(&self, leaves: &[Hash]) -> Result<Hash, TreeError> {
+        let mut inner = self.inner.lock();
+        let root = Self::_insert_many(&mut inner, &self.hasher, leaves)?;
+        let snap = inner.snapshot();
+        self.snapshot.store(Arc::new(snap));
+        Ok(root)
+    }
+
+    /// The current Merkle root, or `None` if the tree is empty.
+    #[cfg(not(feature = "concurrent"))]
+    pub fn root(&self) -> Option<Hash> {
+        self.inner.root
+    }
+
+    /// The current Merkle root, or `None` if the tree is empty.
+    #[cfg(feature = "concurrent")]
+    pub fn root(&self) -> Option<Hash> {
+        self.snapshot.load().root
+    }
+
+    /// Number of leaves in the tree.
+    #[cfg(not(feature = "concurrent"))]
+    pub fn size(&self) -> u64 {
+        self.inner.size
+    }
+
+    /// Number of leaves in the tree.
+    #[cfg(feature = "concurrent")]
+    pub fn size(&self) -> u64 {
+        self.snapshot.load().size
+    }
+
+    /// Current depth (hash layers above the leaf level).
+    #[cfg(not(feature = "concurrent"))]
+    pub fn depth(&self) -> usize {
+        self.inner.depth
+    }
+
+    /// Current depth (hash layers above the leaf level).
+    #[cfg(feature = "concurrent")]
+    pub fn depth(&self) -> usize {
+        self.snapshot.load().depth
+    }
+
+    /// Create an immutable snapshot for proof generation.
+    #[cfg(not(feature = "concurrent"))]
+    pub fn snapshot(&self) -> TreeSnapshot<N, MAX_DEPTH> {
+        self.inner.snapshot()
+    }
+
+    /// Create an immutable snapshot for proof generation.
+    ///
+    /// Returns an `Arc` for lock-free sharing across threads.
+    #[cfg(feature = "concurrent")]
+    pub fn snapshot(&self) -> Arc<TreeSnapshot<N, MAX_DEPTH>> {
+        self.snapshot.load_full()
+    }
+
+    pub(crate) fn _insert(
+        inner: &mut TreeInner<N, MAX_DEPTH>,
+        hasher: &H,
+        leaf: Hash,
+    ) -> Result<Hash, TreeError> {
+        let new_size = inner
+            .size
+            .checked_add(1)
+            .ok_or(TreeError::CapacityExceeded)?;
+        let depth = ceil_log_n(new_size, N);
+        if depth > MAX_DEPTH {
+            return Err(TreeError::MaxDepthExceeded {
+                max_depth: MAX_DEPTH,
+            });
+        }
+        let index = u64_to_usize(inner.size)?;
+
+        let mut node = leaf;
+        let mut idx = index;
+        for level in 0..depth {
+            inner.levels[level].set(idx, node)?;
+
+            let child_pos = idx.checked_rem(N).ok_or(TreeError::MathError)?;
+            if child_pos != 0 {
+                let group_start =
+                    idx.checked_sub(child_pos).ok_or(TreeError::MathError)?;
+                let count = child_pos.checked_add(1).ok_or(TreeError::MathError)?;
+                let mut children = [[0u8; 32]; N];
+                for (i, slot) in children.iter_mut().enumerate().take(count) {
+                    *slot = inner.levels[level]
+                        .get(group_start.checked_add(i).ok_or(TreeError::MathError)?)?;
+                }
+                node = hasher.hash_children(&children[..count]);
+            }
+            idx = idx.checked_div(N).ok_or(TreeError::MathError)?;
+        }
+
+        if depth < MAX_DEPTH {
+            inner.levels[depth].set(0, node)?;
+        }
+        inner.root = Some(node);
+        inner.size = new_size;
+        inner.depth = depth;
+        Ok(node)
+    }
+
+    /// Compute the parent hash for a group at `parent_idx`
+    /// within a single level.
+    fn _compute_parent(
+        child_level: &ChunkedLevel,
+        parent_idx: usize,
+        level_len: usize,
+        hasher: &H,
+    ) -> Result<Hash, TreeError> {
+        let group_start = parent_idx.checked_mul(N).ok_or(TreeError::MathError)?;
+        let group_end = core::cmp::min(
+            group_start.checked_add(N).ok_or(TreeError::MathError)?,
+            level_len,
+        );
+        let count = group_end
+            .checked_sub(group_start)
+            .ok_or(TreeError::MathError)?;
+        if count == 1 {
+            child_level.get(group_start)
+        } else {
+            let mut children = [[0u8; 32]; N];
+            for (i, slot) in children.iter_mut().enumerate().take(count) {
+                *slot = child_level
+                    .get(group_start.checked_add(i).ok_or(TreeError::MathError)?)?;
+            }
+            Ok(hasher.hash_children(&children[..count]))
+        }
+    }
+
+    /// Sequential inner loop for one level of `_insert_many`.
+    #[allow(clippy::too_many_arguments)]
+    fn _insert_many_level_seq(
+        levels: &mut [ChunkedLevel],
+        level: usize,
+        start_parent: usize,
+        num_parents: usize,
+        level_len: usize,
+        is_root_level: bool,
+        hasher: &H,
+        root: &mut Hash,
+    ) -> Result<(), TreeError> {
+        for parent_idx in start_parent..num_parents {
+            let parent =
+                Self::_compute_parent(&levels[level], parent_idx, level_len, hasher)?;
+            let next_level = level.checked_add(1).ok_or(TreeError::MathError)?;
+            if next_level < levels.len() {
+                levels[next_level].set(parent_idx, parent)?;
+            }
+            if is_root_level {
+                *root = parent;
+            }
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "parallel")]
+    fn _parallel_threshold() -> usize {
+        static THRESHOLD: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+        *THRESHOLD.get_or_init(|| {
+            std::env::var("ROTORTRee_PARALLEL_THRESHOLD")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(64)
+        })
+    }
+
+    pub(crate) fn _insert_many(
+        inner: &mut TreeInner<N, MAX_DEPTH>,
+        hasher: &H,
+        leaves: &[Hash],
+    ) -> Result<Hash, TreeError> {
+        if leaves.is_empty() {
+            return Err(TreeError::EmptyBatch);
+        }
+
+        let batch_len = u64::try_from(leaves.len()).unwrap_or(u64::MAX);
+        let new_size = inner
+            .size
+            .checked_add(batch_len)
+            .ok_or(TreeError::CapacityExceeded)?;
+        let depth = ceil_log_n(new_size, N);
+        if depth > MAX_DEPTH {
+            return Err(TreeError::MaxDepthExceeded {
+                max_depth: MAX_DEPTH,
+            });
+        }
+
+        inner.levels[0].extend(leaves)?;
+
+        let old_size_usize = u64_to_usize(inner.size)?;
+        let mut start_parent =
+            old_size_usize.checked_div(N).ok_or(TreeError::MathError)?;
+
+        let mut root = if depth == 0 {
+            inner.levels[0].get(0)?
+        } else {
+            [0u8; 32]
+        };
+
+        for level in 0..depth {
+            let level_len = inner.levels[level].len;
+            let num_parents = level_len.div_ceil(N);
+            let is_root_level =
+                level.checked_add(1).ok_or(TreeError::MathError)? == depth;
+
+            #[cfg(feature = "parallel")]
+            {
+                let work = num_parents
+                    .checked_sub(start_parent)
+                    .ok_or(TreeError::MathError)?;
+                if work >= Self::_parallel_threshold() {
+                    use rayon::prelude::*;
+
+                    let split_at = level.checked_add(1).ok_or(TreeError::MathError)?;
+                    let (child_levels, parent_levels) =
+                        inner.levels.split_at_mut(split_at);
+                    let child_level = &child_levels[level];
+
+                    let results: Vec<Result<(usize, Hash), TreeError>> = (start_parent
+                        ..num_parents)
+                        .into_par_iter()
+                        .map(|parent_idx| {
+                            let hash = Self::_compute_parent(
+                                child_level,
+                                parent_idx,
+                                level_len,
+                                hasher,
+                            )?;
+                            Ok((parent_idx, hash))
+                        })
+                        .collect();
+
+                    let parent_level = &mut parent_levels[0];
+                    for result in &results {
+                        let &(idx, hash) = result.as_ref().map_err(|e| e.clone())?;
+                        let next_level =
+                            level.checked_add(1).ok_or(TreeError::MathError)?;
+                        if next_level < MAX_DEPTH {
+                            parent_level.set(idx, hash)?;
+                        }
+                        if is_root_level {
+                            root = hash;
+                        }
+                    }
+                } else {
+                    Self::_insert_many_level_seq(
+                        &mut inner.levels,
+                        level,
+                        start_parent,
+                        num_parents,
+                        level_len,
+                        is_root_level,
+                        hasher,
+                        &mut root,
+                    )?;
+                }
+            }
+
+            #[cfg(not(feature = "parallel"))]
+            Self::_insert_many_level_seq(
+                &mut inner.levels,
+                level,
+                start_parent,
+                num_parents,
+                level_len,
+                is_root_level,
+                hasher,
+                &mut root,
+            )?;
+
+            start_parent = start_parent.checked_div(N).ok_or(TreeError::MathError)?;
+        }
+
+        inner.root = Some(root);
+        inner.size = new_size;
+        inner.depth = depth;
+        Ok(root)
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(feature = "concurrent", allow(unused_mut))]
+mod tests {
+    #[cfg(not(feature = "std"))]
+    use alloc::vec::Vec;
+    #[cfg(feature = "std")]
+    use std::vec::Vec;
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct XorHasher;
+
+    impl crate::Hasher for XorHasher {
+        fn hash_children(&self, children: &[Hash]) -> Hash {
+            let mut result = [0u8; 32];
+            for child in children {
+                for (r, c) in result.iter_mut().zip(child.iter()) {
+                    *r ^= c;
+                }
+            }
+            result
+        }
+    }
+
+    fn leaf(n: u8) -> Hash {
+        let mut h = [0u8; 32];
+        h[0] = n;
+        h
+    }
+
+    #[test]
+    fn ceil_log_n_empty() {
+        assert_eq!(ceil_log_n(0, 2), 0);
+    }
+
+    #[test]
+    fn ceil_log_n_one() {
+        assert_eq!(ceil_log_n(1, 2), 0);
+    }
+
+    #[test]
+    fn ceil_log_n_binary_full() {
+        assert_eq!(ceil_log_n(4, 2), 2);
+    }
+
+    #[test]
+    fn ceil_log_n_binary_partial() {
+        assert_eq!(ceil_log_n(3, 2), 2);
+    }
+
+    #[test]
+    fn ceil_log_n_ternary() {
+        assert_eq!(ceil_log_n(4, 3), 2);
+    }
+
+    #[test]
+    fn ceil_log_n_ternary_exact() {
+        assert_eq!(ceil_log_n(9, 3), 2);
+    }
+
+    #[test]
+    fn ceil_log_n_quaternary() {
+        assert_eq!(ceil_log_n(16, 4), 2);
+        assert_eq!(ceil_log_n(17, 4), 3);
+    }
+
+    #[test]
+    fn ceil_log_n_large_n() {
+        assert_eq!(ceil_log_n(256, 16), 2);
+        assert_eq!(ceil_log_n(257, 16), 3);
+    }
+
+    #[test]
+    fn chunked_level_push_and_get() {
+        let mut level = ChunkedLevel::new();
+        for i in 0u8..10 {
+            level.push(leaf(i)).unwrap();
+        }
+        assert_eq!(level.len, 10);
+        for i in 0u8..10 {
+            assert_eq!(level.get(i as usize).unwrap(), leaf(i));
+        }
+    }
+
+    #[test]
+    fn chunked_level_promotes_at_chunk_size() {
+        let mut level = ChunkedLevel::new();
+        for i in 0..CHUNK_SIZE {
+            level.push(leaf(i as u8)).unwrap();
+        }
+        assert_eq!(level.chunks.len(), 1);
+        assert_eq!(level.tail_len, 0);
+        assert_eq!(level.len, CHUNK_SIZE);
+
+        // One more goes into the new tail.
+        level.push(leaf(0xFF)).unwrap();
+        assert_eq!(level.chunks.len(), 1);
+        assert_eq!(level.tail_len, 1);
+        assert_eq!(level.len, CHUNK_SIZE + 1);
+    }
+
+    #[test]
+    fn chunked_level_snapshot_shares_arcs() {
+        let mut level = ChunkedLevel::new();
+        for i in 0..CHUNK_SIZE + 5 {
+            level.push(leaf(i as u8)).unwrap();
+        }
+        let snap = level.snapshot();
+        assert_eq!(snap.len(), level.len);
+        // The completed chunk Arc is shared.
+        assert!(Arc::ptr_eq(&level.chunks[0], &snap.chunks[0]));
+        // Data matches.
+        for i in 0..level.len {
+            assert_eq!(level.get(i).unwrap(), snap.get(i).unwrap());
+        }
+    }
+
+    #[test]
+    fn empty_tree() {
+        let tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        assert_eq!(tree.root(), None);
+        assert_eq!(tree.size(), 0);
+        assert_eq!(tree.depth(), 0);
+    }
+
+    #[test]
+    fn insert_single_leaf_binary() {
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        let l = leaf(1);
+        let root = tree.insert(l).unwrap();
+        assert_eq!(root, l); // single leaf = root (lifted)
+        assert_eq!(tree.size(), 1);
+        assert_eq!(tree.depth(), 0);
+    }
+
+    #[test]
+    fn insert_two_leaves_binary() {
+        let hasher = XorHasher;
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(hasher.clone());
+        let l0 = leaf(1);
+        let l1 = leaf(2);
+        tree.insert(l0).unwrap();
+        let root = tree.insert(l1).unwrap();
+
+        let expected = hasher.hash_children(&[l0, l1]);
+        assert_eq!(root, expected);
+        assert_eq!(tree.size(), 2);
+        assert_eq!(tree.depth(), 1);
+    }
+
+    #[test]
+    fn insert_three_leaves_binary() {
+        let h = XorHasher;
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        let l0 = leaf(1);
+        let l1 = leaf(2);
+        let l2 = leaf(3);
+        tree.insert(l0).unwrap();
+        tree.insert(l1).unwrap();
+        let root = tree.insert(l2).unwrap();
+
+        // Level 0: [l0, l1, l2]
+        // Level 1: [H(l0,l1), l2_lifted]
+        // Level 2: [H(H(l0,l1), l2)]
+        let h01 = h.hash_children(&[l0, l1]);
+        let expected = h.hash_children(&[h01, l2]);
+        assert_eq!(root, expected);
+        assert_eq!(tree.depth(), 2);
+    }
+
+    #[test]
+    fn insert_four_leaves_binary() {
+        let h = XorHasher;
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
+        for &l in &leaves {
+            tree.insert(l).unwrap();
+        }
+
+        // Level 0: [l0, l1, l2, l3]
+        // Level 1: [H(l0,l1), H(l2,l3)]
+        // Level 2: [H(H(l0,l1), H(l2,l3))]
+        let h01 = h.hash_children(&[leaves[0], leaves[1]]);
+        let h23 = h.hash_children(&[leaves[2], leaves[3]]);
+        let expected = h.hash_children(&[h01, h23]);
+        assert_eq!(tree.root(), Some(expected));
+        assert_eq!(tree.depth(), 2);
+    }
+
+    #[test]
+    fn insert_four_leaves_ternary() {
+        let h = XorHasher;
+        let mut tree = LeanIMT::<XorHasher, 3, 32>::new(h.clone());
+        let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
+        for &l in &leaves {
+            tree.insert(l).unwrap();
+        }
+
+        // Level 0: [l0, l1, l2, l3]
+        // Level 1: [H(l0,l1,l2), l3_lifted]
+        // Level 2: [H(H(l0,l1,l2), l3)]
+        let h012 = h.hash_children(&[leaves[0], leaves[1], leaves[2]]);
+        let expected = h.hash_children(&[h012, leaves[3]]);
+        assert_eq!(tree.root(), Some(expected));
+        assert_eq!(tree.depth(), 2);
+    }
+
+    #[test]
+    fn insert_two_leaves_ternary() {
+        let h = XorHasher;
+        let mut tree = LeanIMT::<XorHasher, 3, 32>::new(h.clone());
+        let l0 = leaf(1);
+        let l1 = leaf(2);
+        tree.insert(l0).unwrap();
+        let root = tree.insert(l1).unwrap();
+
+        let expected = h.hash_children(&[l0, l1]);
+        assert_eq!(root, expected);
+        assert_eq!(tree.depth(), 1);
+    }
+
+    #[test]
+    fn insert_five_leaves_quaternary() {
+        let h = XorHasher;
+        let mut tree = LeanIMT::<XorHasher, 4, 32>::new(h.clone());
+        let leaves: Vec<Hash> = (1..=5).map(leaf).collect();
+        for &l in &leaves {
+            tree.insert(l).unwrap();
+        }
+
+        // Level 0: [l0..l4]
+        // Level 1: [H(l0,l1,l2,l3), l4_lifted]
+        // Level 2: [H(H(l0,l1,l2,l3), l4)]
+        let h0123 = h.hash_children(&[leaves[0], leaves[1], leaves[2], leaves[3]]);
+        let expected = h.hash_children(&[h0123, leaves[4]]);
+        assert_eq!(tree.root(), Some(expected));
+        assert_eq!(tree.depth(), 2);
+    }
+
+    #[test]
+    fn insert_many_matches_sequential_binary() {
+        let h = XorHasher;
+        let leaves: Vec<Hash> = (1..=7).map(leaf).collect();
+
+        let mut seq = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        for &l in &leaves {
+            seq.insert(l).unwrap();
+        }
+
+        let mut batch = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        batch.insert_many(&leaves).unwrap();
+
+        assert_eq!(seq.root(), batch.root());
+        assert_eq!(seq.size(), batch.size());
+    }
+
+    #[test]
+    fn insert_many_matches_sequential_ternary() {
+        let h = XorHasher;
+        let leaves: Vec<Hash> = (1..=10).map(leaf).collect();
+
+        let mut seq = LeanIMT::<XorHasher, 3, 32>::new(h.clone());
+        for &l in &leaves {
+            seq.insert(l).unwrap();
+        }
+
+        let mut batch = LeanIMT::<XorHasher, 3, 32>::new(h.clone());
+        batch.insert_many(&leaves).unwrap();
+
+        assert_eq!(seq.root(), batch.root());
+    }
+
+    #[test]
+    fn insert_many_incremental() {
+        let h = XorHasher;
+        let leaves: Vec<Hash> = (1..=10).map(leaf).collect();
+
+        let mut seq = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        for &l in &leaves {
+            seq.insert(l).unwrap();
+        }
+
+        let mut mixed = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        for &l in &leaves[..3] {
+            mixed.insert(l).unwrap();
+        }
+        mixed.insert_many(&leaves[3..]).unwrap();
+
+        assert_eq!(seq.root(), mixed.root());
+    }
+
+    #[test]
+    fn insert_many_empty_batch_error() {
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        assert_eq!(tree.insert_many(&[]), Err(TreeError::EmptyBatch));
+    }
+
+    #[test]
+    fn max_depth_exceeded() {
+        let mut tree = LeanIMT::<XorHasher, 2, 1>::new(XorHasher);
+        let l = [0u8; 32];
+        tree.insert(l).unwrap(); // size=1, depth=0
+        tree.insert(l).unwrap(); // size=2, depth=1
+        let err = tree.insert(l).unwrap_err();
+        assert_eq!(err, TreeError::MaxDepthExceeded { max_depth: 1 });
+    }
+
+    #[cfg(feature = "blake3")]
+    mod blake3_tests {
+        use super::*;
+        use crate::Blake3Hasher;
+
+        fn blake3_leaf(n: u8) -> Hash {
+            *::blake3::hash(&[n]).as_bytes()
+        }
+
+        #[test]
+        fn binary_four_leaves_known_vector() {
+            let h = Blake3Hasher;
+            let mut tree = LeanIMT::<Blake3Hasher, 2, 32>::new(h);
+
+            let l0 = blake3_leaf(0);
+            let l1 = blake3_leaf(1);
+            let l2 = blake3_leaf(2);
+            let l3 = blake3_leaf(3);
+
+            let r1 = tree.insert(l0).unwrap();
+            assert_eq!(r1, l0);
+
+            let r2 = tree.insert(l1).unwrap();
+            let h01 = h.hash_children(&[l0, l1]);
+            assert_eq!(r2, h01);
+
+            let r3 = tree.insert(l2).unwrap();
+            let expected3 = h.hash_children(&[h01, l2]);
+            assert_eq!(r3, expected3);
+
+            let r4 = tree.insert(l3).unwrap();
+            let h23 = h.hash_children(&[l2, l3]);
+            let expected4 = h.hash_children(&[h01, h23]);
+            assert_eq!(r4, expected4);
+        }
+
+        #[test]
+        fn ternary_four_leaves_known_vector() {
+            let h = Blake3Hasher;
+            let mut tree = LeanIMT::<Blake3Hasher, 3, 32>::new(h);
+
+            let l0 = blake3_leaf(0);
+            let l1 = blake3_leaf(1);
+            let l2 = blake3_leaf(2);
+            let l3 = blake3_leaf(3);
+
+            tree.insert(l0).unwrap();
+
+            let r2 = tree.insert(l1).unwrap();
+            assert_eq!(r2, h.hash_children(&[l0, l1]));
+
+            let r3 = tree.insert(l2).unwrap();
+            assert_eq!(r3, h.hash_children(&[l0, l1, l2]));
+
+            let r4 = tree.insert(l3).unwrap();
+            let h012 = h.hash_children(&[l0, l1, l2]);
+            assert_eq!(r4, h.hash_children(&[h012, l3]));
+        }
+
+        #[test]
+        fn quaternary_five_leaves_known_vector() {
+            let h = Blake3Hasher;
+            let mut tree = LeanIMT::<Blake3Hasher, 4, 32>::new(h);
+
+            let leaves: Vec<Hash> = (0..5).map(blake3_leaf).collect();
+            for &l in &leaves {
+                tree.insert(l).unwrap();
+            }
+
+            let h0123 = h.hash_children(&[leaves[0], leaves[1], leaves[2], leaves[3]]);
+            let expected = h.hash_children(&[h0123, leaves[4]]);
+            assert_eq!(tree.root(), Some(expected));
+        }
+    }
+}
+
+#[cfg(all(test, feature = "concurrent"))]
+mod concurrent_tests {
+    use std::{
+        sync::Arc,
+        thread,
+        vec::Vec,
+    };
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct XorHasher;
+
+    impl crate::Hasher for XorHasher {
+        fn hash_children(&self, children: &[Hash]) -> Hash {
+            let mut result = [0u8; 32];
+            for child in children {
+                for (r, c) in result.iter_mut().zip(child.iter()) {
+                    *r ^= c;
+                }
+            }
+            result
+        }
+    }
+
+    fn leaf(n: u8) -> Hash {
+        let mut h = [0u8; 32];
+        h[0] = n;
+        h
+    }
+
+    #[test]
+    fn concurrent_insert_single_thread() {
+        let tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        for i in 1..=10u8 {
+            tree.insert(leaf(i)).unwrap();
+        }
+        assert_eq!(tree.size(), 10);
+
+        let snap = tree.snapshot();
+        for i in 0..10u64 {
+            let proof = snap.generate_proof(i).unwrap();
+            assert!(proof.verify(&XorHasher).unwrap());
+        }
+    }
+
+    #[test]
+    fn concurrent_multi_thread_insert() {
+        let tree = Arc::new(LeanIMT::<XorHasher, 2, 32>::new(XorHasher));
+        let num_threads = 4;
+        let leaves_per_thread = 50;
+
+        let handles: Vec<_> = (0..num_threads)
+            .map(|t| {
+                let tree = Arc::clone(&tree);
+                thread::spawn(move || {
+                    let base = (t * leaves_per_thread) as u8;
+                    for i in 0..leaves_per_thread as u8 {
+                        let mut l = [0u8; 32];
+                        l[0] = base.wrapping_add(i);
+                        l[1] = t as u8;
+                        tree.insert(l).unwrap();
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let total = num_threads * leaves_per_thread;
+        assert_eq!(tree.size(), total as u64);
+
+        let snap = tree.snapshot();
+        for i in 0..total as u64 {
+            let proof = snap.generate_proof(i).unwrap();
+            assert!(proof.verify(&XorHasher).unwrap());
+        }
+    }
+
+    #[test]
+    fn concurrent_reader_writer() {
+        let tree = Arc::new(LeanIMT::<XorHasher, 2, 32>::new(XorHasher));
+        let num_inserts = 200u64;
+        let num_readers = 3;
+
+        let writer_tree = Arc::clone(&tree);
+        let writer = thread::spawn(move || {
+            for i in 0..num_inserts {
+                let mut l = [0u8; 32];
+                l[0] = i as u8;
+                l[1] = (i >> 8) as u8;
+                writer_tree.insert(l).unwrap();
+            }
+        });
+
+        let readers: Vec<_> = (0..num_readers)
+            .map(|_| {
+                let tree = Arc::clone(&tree);
+                thread::spawn(move || {
+                    for _ in 0..100 {
+                        let snap = tree.snapshot();
+                        let size = snap.size();
+                        if size == 0 {
+                            continue;
+                        }
+                        for i in 0..size {
+                            let proof = snap.generate_proof(i).unwrap();
+                            assert!(proof.verify(&XorHasher).unwrap());
+                        }
+                    }
+                })
+            })
+            .collect();
+
+        writer.join().unwrap();
+        for r in readers {
+            r.join().unwrap();
+        }
+
+        assert_eq!(tree.size(), num_inserts);
+    }
+
+    #[test]
+    fn snapshot_isolation() {
+        let tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        for i in 1..=5u8 {
+            tree.insert(leaf(i)).unwrap();
+        }
+
+        let snap = tree.snapshot();
+        let snap_root = snap.root();
+        let snap_size = snap.size();
+        let snap_depth = snap.depth();
+
+        // Insert more after taking the snapshot.
+        for i in 6..=10u8 {
+            tree.insert(leaf(i)).unwrap();
+        }
+
+        // The snapshot must be unchanged.
+        assert_eq!(snap.root(), snap_root);
+        assert_eq!(snap.size(), snap_size);
+        assert_eq!(snap.depth(), snap_depth);
+
+        // But the tree itself has advanced.
+        assert_eq!(tree.size(), 10);
+        assert_ne!(tree.root(), snap_root);
+    }
+
+    #[test]
+    fn concurrent_insert_many() {
+        let tree = Arc::new(LeanIMT::<XorHasher, 2, 32>::new(XorHasher));
+        let num_threads = 4;
+        let batch_size = 25;
+
+        let handles: Vec<_> = (0..num_threads)
+            .map(|t| {
+                let tree = Arc::clone(&tree);
+                thread::spawn(move || {
+                    let batch: Vec<Hash> = (0..batch_size)
+                        .map(|i| {
+                            let mut l = [0u8; 32];
+                            l[0] = i as u8;
+                            l[1] = t as u8;
+                            l
+                        })
+                        .collect();
+                    tree.insert_many(&batch).unwrap();
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let total = (num_threads * batch_size) as u64;
+        assert_eq!(tree.size(), total);
+
+        let snap = tree.snapshot();
+        for i in 0..total {
+            let proof = snap.generate_proof(i).unwrap();
+            assert!(proof.verify(&XorHasher).unwrap());
+        }
+    }
+}
+
+#[cfg(all(test, feature = "parallel"))]
+#[cfg_attr(feature = "concurrent", allow(unused_mut))]
+mod parallel_tests {
+    use std::vec::Vec;
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct XorHasher;
+
+    impl crate::Hasher for XorHasher {
+        fn hash_children(&self, children: &[Hash]) -> Hash {
+            let mut result = [0u8; 32];
+            for child in children {
+                for (r, c) in result.iter_mut().zip(child.iter()) {
+                    *r ^= c;
+                }
+            }
+            result
+        }
+    }
+
+    fn make_leaves(count: usize) -> Vec<Hash> {
+        (0..count)
+            .map(|i| {
+                let mut h = [0u8; 32];
+                let bytes = (i as u64).to_le_bytes();
+                h[..8].copy_from_slice(&bytes);
+                h
+            })
+            .collect()
+    }
+
+    #[test]
+    fn parallel_insert_many_matches_sequential_binary() {
+        let leaves = make_leaves(1000);
+
+        let mut seq = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        for &l in &leaves {
+            seq.insert(l).unwrap();
+        }
+
+        let mut batch = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        batch.insert_many(&leaves).unwrap();
+
+        assert_eq!(seq.root(), batch.root());
+        assert_eq!(seq.size(), batch.size());
+    }
+
+    #[test]
+    fn parallel_insert_many_matches_sequential_ternary() {
+        let leaves = make_leaves(1000);
+
+        let mut seq = LeanIMT::<XorHasher, 3, 32>::new(XorHasher);
+        for &l in &leaves {
+            seq.insert(l).unwrap();
+        }
+
+        let mut batch = LeanIMT::<XorHasher, 3, 32>::new(XorHasher);
+        batch.insert_many(&leaves).unwrap();
+
+        assert_eq!(seq.root(), batch.root());
+    }
+
+    #[test]
+    fn parallel_insert_many_matches_sequential_quaternary() {
+        let leaves = make_leaves(1000);
+
+        let mut seq = LeanIMT::<XorHasher, 4, 32>::new(XorHasher);
+        for &l in &leaves {
+            seq.insert(l).unwrap();
+        }
+
+        let mut batch = LeanIMT::<XorHasher, 4, 32>::new(XorHasher);
+        batch.insert_many(&leaves).unwrap();
+
+        assert_eq!(seq.root(), batch.root());
+    }
+
+    #[test]
+    fn parallel_large_batch_proofs() {
+        let leaves = make_leaves(2000);
+
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        tree.insert_many(&leaves).unwrap();
+
+        let snap = tree.snapshot();
+        for i in 0..2000u64 {
+            let proof = snap.generate_proof(i).unwrap();
+            assert!(proof.verify(&XorHasher).unwrap());
+        }
+    }
+
+    #[test]
+    fn parallel_insert_many_incremental() {
+        let leaves = make_leaves(1000);
+
+        let mut seq = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        for &l in &leaves {
+            seq.insert(l).unwrap();
+        }
+
+        let mut mixed = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        for &l in &leaves[..100] {
+            mixed.insert(l).unwrap();
+        }
+        mixed.insert_many(&leaves[100..]).unwrap();
+
+        assert_eq!(seq.root(), mixed.root());
+    }
+}
