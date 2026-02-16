@@ -180,11 +180,14 @@ RUSTFLAGS="-C target-cpu=native" cargo bench tree_bench_storage::insert_many --f
 | insert_many_n8_100000 | 4.031 ms (24.8 Mitem/s) | 4.854 ms (20.6 Mitem/s) | 4.412 ms (22.66 Mitem/s) | 4.419 ms (22.62 Mitem/s) | 100 | 100 |
 | insert_many_n8_1000000 | 41.44 ms (24.12 Mitem/s) | 55.65 ms (17.96 Mitem/s) | 47.64 ms (20.98 Mitem/s) | 47.52 ms (21.04 Mitem/s) | 100 | 100 |
 | insert_many_n16_1000 | 41.91 µs (23.85 Mitem/s) | 257.4 µs (3.884 Mitem/s) | 48.33 µs (20.68 Mitem/s) | 50.37 µs (19.85 Mitem/s) | 100 | 100 |
-| insert_many_n16_10000 | 362.5 µs (27.58 Mitem/s) | 784.8 µs (12.74 Mitem/s) | 413.6 µs (24.17 Mitem/s) | 420.4 µs (23.78 Mitem/s) | 100 | 100 |
+| insert_many_n16_10000 | **362.5 µs (27.58 Mitem/s)** | 784.8 µs (12.74 Mitem/s) | 413.6 µs (24.17 Mitem/s) | 420.4 µs (23.78 Mitem/s) | 100 | 100 |
 | insert_many_n16_100000 | 3.767 ms (26.54 Mitem/s) | 4.567 ms (21.89 Mitem/s) | 4.087 ms (24.46 Mitem/s) | 4.098 ms (24.39 Mitem/s) | 100 | 100 |
 | insert_many_n16_1000000 | 38.34 ms (26.07 Mitem/s) | 49.58 ms (20.16 Mitem/s) | 44.12 ms (22.66 Mitem/s) | 43.86 ms (22.79 Mitem/s) | 100 | 100 |
 
-this gives us quite some room for a read-through cache incase we want to make use of larger trees
+peak insertions/sec is ~ 27.58 Million/sec this gives us quite some room for a read-through cache incase we want to make use of larger trees
+
+> [!NOTE]
+> There are more realistic benchmarks that simulate performance under load, i.e concurrent reads / proof generation + insertions 
 
 ## Future work
 
