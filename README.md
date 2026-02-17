@@ -186,7 +186,9 @@ with MAX_DEPTH=32
 | insert_many_n16_100000 | 1.507 ms (66.34 Mitem/s) | 5.673 ms (17.62 Mitem/s) | 2.646 ms (37.78 Mitem/s) | 2.843 ms (35.16 Mitem/s) | 1000 | 1000 |
 | insert_many_n16_1000000 | **8.626 ms (115.9 Mitem/s)** | 14.2 ms (70.39 Mitem/s) | 9.779 ms (102.2 Mitem/s) | 9.78 ms (102.2 Mitem/s) | 1000 | 1000 |
 
-peak insertions/sec is ~ 115.9 Million leaves/sec, overall, the design scales well with increased branching factor + parallelism
+peak insertions/sec is ~ 115.9M leaves/sec, overall, the design scales well with increased branching factor + parallelism
+
+there seems to be some performance variance with the storage feature enabled, assume due to some contention. the pure in-memory benchmark (tree_bench_parallel) exhibits much lesser variance, and achieves peak throughput upto ~140M leaves/sec; why would anyone need this much? i do not know myself. single threaded by far has the best performance characteristic in terms of variance though, useful to keep in mind if that is a constraint; trading off performance for predictability under load.
 
 > [!NOTE]
 > There are more realistic benchmarks that simulate performance under load, i.e concurrent reads / proof generation + insertions 
