@@ -9,10 +9,10 @@ rust-version = "1.90.0"
 default = ["blake3"]
 blake3 = ["dep:blake3"]
 wincode = ["dep:wincode"]
-std = ["blake3?/std", "wincode?/std"]
+std = ["blake3?/std", "wincode?/std", "crc-fast?/std"]
 concurrent = ["std", "dep:parking_lot", "dep:arc-swap"]
 parallel = ["std", "dep:rayon"]
-storage = ["std", "dep:parking_lot", "dep:arc-swap", "wincode", "dep:crc32c", "dep:fs2"]
+storage = ["std", "dep:parking_lot", "dep:arc-swap", "wincode", "dep:crc-fast", "dep:fs2"]
 
 [dependencies]
 blake3 = { version = "1", default-features = false, optional = true }
@@ -20,7 +20,7 @@ wincode = { version = "0.4", default-features = false, features = ["alloc", "der
 parking_lot = { version = "0.12", optional = true }
 arc-swap = { version = "1", optional = true }
 rayon = { version = "1", optional = true }
-crc32c = { version = "0.6", optional = true }
+crc-fast = { version = "1.10", default-features = false, optional = true }
 fs2 = { version = "0.4", optional = true }
 
 [dev-dependencies]

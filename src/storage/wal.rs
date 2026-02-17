@@ -76,7 +76,7 @@ fn write_frame_serialized<
             .to_le_bytes(),
     );
     wincode::serialize_into(&mut *buf, value).expect("serialize_into cannot fail");
-    let crc = crc32c::crc32c(&buf[start..]);
+    let crc = crc_fast::crc32_iscsi(&buf[start..]);
     buf.extend_from_slice(&crc.to_le_bytes());
 }
 
@@ -111,7 +111,7 @@ fn read_frame(
         .ok_or(StorageError::MathError)?;
     let crc_end = crc_offset.checked_add(4).ok_or(StorageError::MathError)?;
     let stored_crc = u32::from_le_bytes(data[crc_offset..crc_end].try_into().unwrap());
-    let computed_crc = crc32c::crc32c(&data[offset..crc_offset]);
+    let computed_crc = crc_fast::crc32_iscsi(&data[offset..crc_offset]);
 
     if stored_crc != computed_crc {
         if offset
