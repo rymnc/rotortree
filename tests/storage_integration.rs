@@ -431,3 +431,55 @@ fn file_locking() {
         Ok(_) => panic!("expected FileLocked, got Ok"),
     }
 }
+
+#[test]
+fn insert_durable_round_trip() {
+    // given
+    let dir = tempfile::tempdir().unwrap();
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+
+    // when
+    let root = tree.insert_durable(leaf(1)).unwrap();
+    assert_eq!(tree.root(), Some(root));
+    assert_eq!(tree.size(), 1);
+    tree.close().unwrap();
+
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+    // then
+    assert_eq!(tree.root(), Some(root));
+    assert_eq!(tree.size(), 1);
+    tree.close().unwrap();
+}
+
+#[test]
+fn flush_policy_batch_size() {
+    // given
+    let dir = tempfile::tempdir().unwrap();
+    let config = RotorTreeConfig {
+        path: dir.path().to_path_buf(),
+        flush_policy: FlushPolicy::BatchSize(5),
+    };
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, config).unwrap();
+
+    // when
+    for i in 0..5u8 {
+        let (_, token) = tree.insert(leaf(i)).unwrap();
+        if i < 4 {
+            assert!(!token.is_durable());
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    let root = tree.root();
+    let size = tree.size();
+    tree.close().unwrap();
+
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+    // then
+    assert_eq!(tree.root(), root);
+    assert_eq!(tree.size(), size);
+    tree.close().unwrap();
+}

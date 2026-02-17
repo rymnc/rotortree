@@ -47,27 +47,27 @@ pub struct NaryProof<const N: usize, const MAX_DEPTH: usize> {
 impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
     /// Verify this proof against the given hasher.
     pub fn verify<H: Hasher>(&self, hasher: &H) -> Result<bool, TreeError> {
+        if self.level_count > MAX_DEPTH {
+            return Err(TreeError::MathError);
+        }
+
         let mut current = self.leaf;
 
-        for i in 0..self.level_count {
-            let level = &self.levels[i];
+        for level in &self.levels[..self.level_count] {
             if level.sibling_count == 0 {
                 continue;
             }
 
-            let total = (level.sibling_count as usize)
-                .checked_add(1)
-                .ok_or(TreeError::MathError)?;
+            let total = (level.sibling_count as usize) + 1;
             let pos = level.position as usize;
+            if total > N || pos >= total {
+                return Err(TreeError::MathError);
+            }
             let mut children = [[0u8; 32]; N];
             children[..pos].copy_from_slice(&level.siblings[..pos]);
             children[pos] = current;
-            let pos_inc = pos.checked_add(1).ok_or(TreeError::MathError)?;
-            let rest = total.checked_sub(pos_inc).ok_or(TreeError::MathError)?;
-            children[pos_inc..total].copy_from_slice(
-                &level.siblings
-                    [pos..pos.checked_add(rest).ok_or(TreeError::MathError)?],
-            );
+            let rest = total - pos - 1;
+            children[pos + 1..total].copy_from_slice(&level.siblings[pos..pos + rest]);
             current = hasher.hash_children(&children[..total]);
         }
 
@@ -94,13 +94,10 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
 
         #[allow(clippy::needless_range_loop)]
         for level in 0..self.depth {
-            let child_pos = index.checked_rem(N).ok_or(TreeError::MathError)?;
-            let group_start = index.checked_sub(child_pos).ok_or(TreeError::MathError)?;
-            let group_end =
-                core::cmp::min(group_start.saturating_add(N), self.levels[level].len());
-            let group_size = group_end
-                .checked_sub(group_start)
-                .ok_or(TreeError::MathError)?;
+            let child_pos = index % N;
+            let group_start = index - child_pos;
+            let group_end = core::cmp::min(group_start + N, self.levels[level].len());
+            let group_size = group_end - group_start;
 
             if group_size == 1 {
                 levels[level] = ProofLevel {
@@ -109,12 +106,14 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
                     siblings: [[0u8; 32]; N],
                 };
             } else {
+                let mut group = [[0u8; 32]; N];
+                self.levels[level].get_group(group_start, group_size, &mut group);
                 let mut siblings = [[0u8; 32]; N];
                 let mut sib_idx = 0usize;
-                for i in group_start..group_end {
-                    if i != index {
-                        siblings[sib_idx] = self.levels[level].get(i)?;
-                        sib_idx = sib_idx.checked_add(1).ok_or(TreeError::MathError)?;
+                for i in 0..group_size {
+                    if i != child_pos {
+                        siblings[sib_idx] = group[i];
+                        sib_idx += 1;
                     }
                 }
                 levels[level] = ProofLevel {
@@ -126,7 +125,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
                 };
             }
 
-            index = index.checked_div(N).ok_or(TreeError::MathError)?;
+            index /= N;
         }
 
         Ok(NaryProof {

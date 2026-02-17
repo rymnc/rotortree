@@ -79,6 +79,7 @@ struct Shared<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
     durability: DurabilityTracker,
     closed: AtomicBool,
     flush_failed: AtomicBool,
+    flush_error: Mutex<Option<Arc<std::io::Error>>>,
     entry_count: AtomicUsize,
 }
 
@@ -100,18 +101,34 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
             .write_all(&buf)
             .and_then(|()| wal_file.sync_data());
 
-        {
-            let mut state = self.state.lock();
-            if state.buffer.is_empty() {
-                let mut returned = buf;
-                returned.clear();
-                state.buffer = returned;
+        match result {
+            Ok(()) => {
+                // empty buf
+                let mut state = self.state.lock();
+                if state.buffer.is_empty() {
+                    let mut returned = buf;
+                    returned.clear();
+                    state.buffer = returned;
+                }
+                self.durability.mark_flushed(last_seq);
+                Ok(())
+            }
+            Err(e) => {
+                // put back into buf
+                let mut state = self.state.lock();
+                if state.buffer.is_empty() {
+                    state.buffer = buf;
+                } else {
+                    let mut combined = buf;
+                    combined.extend_from_slice(&state.buffer);
+                    state.buffer = combined;
+                }
+                let err = Arc::new(e);
+                *self.flush_error.lock() = Some(Arc::clone(&err));
+                self.flush_failed.store(true, Ordering::Relaxed);
+                Err(StorageError::FlushFailed(err))
             }
         }
-
-        result?;
-        self.durability.mark_flushed(last_seq);
-        Ok(())
     }
 
     fn check_closed(&self) -> Result<(), StorageError> {
@@ -119,7 +136,10 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
             return Err(StorageError::Closed);
         }
         if self.flush_failed.load(Ordering::Relaxed) {
-            return Err(StorageError::FlushFailed);
+            let err = self.flush_error.lock().clone().unwrap_or_else(|| {
+                Arc::new(std::io::Error::other("unknown flush error"))
+            });
+            return Err(StorageError::FlushFailed(err));
         }
         Ok(())
     }
@@ -196,6 +216,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
             durability,
             closed: AtomicBool::new(false),
             flush_failed: AtomicBool::new(false),
+            flush_error: Mutex::new(None),
             entry_count: AtomicUsize::new(0),
         });
 
@@ -346,7 +367,6 @@ fn start_flush_thread<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
                     }
                     drop(stop);
                     if let Err(e) = shared.flush_inner() {
-                        shared.flush_failed.store(true, Ordering::Relaxed);
                         eprintln!("rotortree: background flush error: {e}");
                     }
                 }
@@ -368,7 +388,6 @@ fn start_flush_thread<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
                     if shared.entry_count.load(Ordering::Relaxed) >= threshold
                         && let Err(e) = shared.flush_inner()
                     {
-                        shared.flush_failed.store(true, Ordering::Relaxed);
                         eprintln!("rotortree: background flush error: {e}");
                     }
                 }

@@ -21,20 +21,22 @@ fn bench_insert_single(n_values: Vec<usize>) {
                 #[divan::bench]
                 fn insert_single_n{{n}}_{{count}}(bencher: divan::Bencher) {
                     let leaves = generate_leaves({{count}});
-                    let dir = tempfile::tempdir().unwrap();
-                    let config = RotorTreeConfig {
-                        path: dir.path().to_path_buf(),
-                        flush_policy: FlushPolicy::Manual,
-                    };
-                    let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                     bencher
                         .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .bench_local(|| {
+                        .with_inputs(|| {
+                            let dir = tempfile::tempdir().unwrap();
+                            let config = RotorTreeConfig {
+                                path: dir.path().to_path_buf(),
+                                flush_policy: FlushPolicy::Manual,
+                            };
+                            let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
+                            (tree, dir)
+                        })
+                        .bench_local_refs(|(tree, _dir)| {
                             for &leaf in &leaves {
                                 divan::black_box(tree.insert(leaf).unwrap());
                             }
                         });
-                    tree.close().unwrap();
                 }
             }
         }
@@ -52,18 +54,20 @@ fn bench_insert_many(n_values: Vec<usize>) {
                 #[divan::bench]
                 fn insert_many_n{{n}}_{{count}}(bencher: divan::Bencher) {
                     let leaves = generate_leaves({{count}});
-                    let dir = tempfile::tempdir().unwrap();
-                    let config = RotorTreeConfig {
-                        path: dir.path().to_path_buf(),
-                        flush_policy: FlushPolicy::Manual,
-                    };
-                    let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                     bencher
                         .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .bench_local(|| {
+                        .with_inputs(|| {
+                            let dir = tempfile::tempdir().unwrap();
+                            let config = RotorTreeConfig {
+                                path: dir.path().to_path_buf(),
+                                flush_policy: FlushPolicy::Manual,
+                            };
+                            let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
+                            (tree, dir)
+                        })
+                        .bench_local_refs(|(tree, _dir)| {
                             divan::black_box(tree.insert_many(&leaves).unwrap());
                         });
-                    tree.close().unwrap();
                 }
             }
         }
@@ -81,19 +85,22 @@ fn bench_flush(n_values: Vec<usize>) {
                 #[divan::bench]
                 fn flush_n{{n}}_{{count}}(bencher: divan::Bencher) {
                     let leaves = generate_leaves({{count}});
-                    let dir = tempfile::tempdir().unwrap();
-                    let config = RotorTreeConfig {
-                        path: dir.path().to_path_buf(),
-                        flush_policy: FlushPolicy::Manual,
-                    };
-                    let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                     bencher
                         .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .bench_local(|| {
+                        .with_inputs(|| {
+                            let dir = tempfile::tempdir().unwrap();
+                            let config = RotorTreeConfig {
+                                path: dir.path().to_path_buf(),
+                                flush_policy: FlushPolicy::Manual,
+                            };
+                            let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             tree.insert_many(&leaves).unwrap();
+                            (tree, dir)
+                        })
+                        .bench_local_values(|(tree, _dir)| {
                             divan::black_box(tree.flush().unwrap());
+                            tree.close().unwrap();
                         });
-                    tree.close().unwrap();
                 }
             }
         }
@@ -125,9 +132,10 @@ fn bench_open_recover(n_values: Vec<usize>) {
                     }
                     bencher
                         .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .bench_local(|| {
+                        .with_inputs(|| path.clone())
+                        .bench_local_values(|path| {
                             let config = RotorTreeConfig {
-                                path: path.clone(),
+                                path,
                                 flush_policy: FlushPolicy::Manual,
                             };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
@@ -152,21 +160,22 @@ fn bench_mixed_workload(n_values: Vec<usize>) {
                 fn mixed_workload_n{{n}}_{{tick}}(bencher: divan::Bencher) {
                     let prepop_leaves = generate_leaves(10_000);
                     let tick_leaves = generate_leaves({{tick}});
-
-                    let dir = tempfile::tempdir().unwrap();
-                    let config = RotorTreeConfig {
-                        path: dir.path().to_path_buf(),
-                        flush_policy: FlushPolicy::Manual,
-                    };
-                    let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
-                    tree.insert_many(&prepop_leaves).unwrap();
-                    tree.flush().unwrap();
-
                     let hasher = Blake3Hasher;
 
                     bencher
                         .counter(divan::counter::ItemsCount::new({{tick}} as usize))
-                        .bench_local(|| {
+                        .with_inputs(|| {
+                            let dir = tempfile::tempdir().unwrap();
+                            let config = RotorTreeConfig {
+                                path: dir.path().to_path_buf(),
+                                flush_policy: FlushPolicy::Manual,
+                            };
+                            let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
+                            tree.insert_many(&prepop_leaves).unwrap();
+                            tree.flush().unwrap();
+                            (tree, dir)
+                        })
+                        .bench_local_values(|(tree, _dir)| {
                             let (root, _token) = tree.insert_many(&tick_leaves).unwrap();
                             divan::black_box(root);
 
@@ -178,8 +187,8 @@ fn bench_mixed_workload(n_values: Vec<usize>) {
                             divan::black_box(&proof);
 
                             divan::black_box(proof.verify(&hasher).unwrap());
+                            tree.close().unwrap();
                         });
-                    tree.close().unwrap();
                 }
             }
         }

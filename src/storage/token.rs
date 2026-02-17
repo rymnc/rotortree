@@ -40,6 +40,7 @@ impl DurabilityTracker {
 
 /// A token returned from `RotorTree::insert` that tracks whether the
 /// corresponding WAL entry has been flushed to disk
+#[derive(Debug)]
 pub struct DurabilityToken {
     seq: u64,
     inner: Arc<(Mutex<Option<u64>>, Condvar)>,

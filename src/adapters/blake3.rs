@@ -15,10 +15,6 @@ impl Blake3Hasher {
 
 impl Hasher for Blake3Hasher {
     fn hash_children(&self, children: &[Hash]) -> Hash {
-        let mut hasher = ::blake3::Hasher::new();
-        for child in children {
-            hasher.update(child);
-        }
-        *hasher.finalize().as_bytes()
+        *::blake3::hash(children.as_flattened()).as_bytes()
     }
 }

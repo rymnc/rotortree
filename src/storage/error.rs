@@ -1,4 +1,7 @@
-use std::fmt;
+use std::{
+    fmt,
+    sync::Arc,
+};
 
 use crate::TreeError;
 
@@ -29,7 +32,7 @@ pub enum StorageError {
     /// A tree operation failed during WAL recovery
     Tree(TreeError),
     /// The background flush thread encountered an I/O error
-    FlushFailed,
+    FlushFailed(Arc<std::io::Error>),
     /// Math error
     MathError,
 }
@@ -66,8 +69,8 @@ impl fmt::Display for StorageError {
             }
             Self::Closed => write!(f, "tree has been closed"),
             Self::Tree(e) => write!(f, "tree error during recovery: {e}"),
-            Self::FlushFailed => {
-                write!(f, "background flush thread encountered an error")
+            Self::FlushFailed(e) => {
+                write!(f, "background flush failed: {e}")
             }
             Self::MathError => {
                 write!(f, "math error")
@@ -81,6 +84,7 @@ impl std::error::Error for StorageError {
         match self {
             Self::Io(e) => Some(e),
             Self::Tree(e) => Some(e),
+            Self::FlushFailed(e) => Some(e.as_ref()),
             _ => None,
         }
     }

@@ -72,12 +72,31 @@ impl ChunkedLevel {
 
     /// Read a hash at the given index.
     fn get(&self, index: usize) -> Result<Hash, TreeError> {
-        let chunk_idx = index.checked_div(CHUNK_SIZE).ok_or(TreeError::MathError)?;
-        let offset = index.checked_rem(CHUNK_SIZE).ok_or(TreeError::MathError)?;
+        let chunk_idx = index / CHUNK_SIZE;
+        let offset = index % CHUNK_SIZE;
         if chunk_idx < self.chunks.len() {
             Ok(self.chunks[chunk_idx][offset])
         } else {
             Ok(self.tail[offset])
+        }
+    }
+
+    /// Copy a contiguous group of hashes into `out`.
+    /// Fast path when the group falls within a single chunk or tail.
+    fn get_group(&self, start: usize, count: usize, out: &mut [Hash]) {
+        let chunk_idx = start / CHUNK_SIZE;
+        let offset = start % CHUNK_SIZE;
+        if offset + count <= CHUNK_SIZE {
+            let src = if chunk_idx < self.chunks.len() {
+                &self.chunks[chunk_idx][offset..offset + count]
+            } else {
+                &self.tail[offset..offset + count]
+            };
+            out[..count].copy_from_slice(src);
+        } else {
+            for (i, item) in out.iter_mut().enumerate().take(count) {
+                *item = self.get(start + i).expect("checked prev; qed");
+            }
         }
     }
 
@@ -86,8 +105,8 @@ impl ChunkedLevel {
         while self.len <= index {
             self.push([0u8; 32])?;
         }
-        let chunk_idx = index.checked_div(CHUNK_SIZE).ok_or(TreeError::MathError)?;
-        let offset = index.checked_rem(CHUNK_SIZE).ok_or(TreeError::MathError)?;
+        let chunk_idx = index / CHUNK_SIZE;
+        let offset = index % CHUNK_SIZE;
         if chunk_idx < self.chunks.len() {
             let chunk = Arc::make_mut(&mut self.chunks[chunk_idx]);
             chunk[offset] = value;
@@ -150,12 +169,29 @@ impl SnapshotLevel {
     };
 
     pub(crate) fn get(&self, index: usize) -> Result<Hash, TreeError> {
-        let chunk_idx = index.checked_div(CHUNK_SIZE).ok_or(TreeError::MathError)?;
-        let offset = index.checked_rem(CHUNK_SIZE).ok_or(TreeError::MathError)?;
+        let chunk_idx = index / CHUNK_SIZE;
+        let offset = index % CHUNK_SIZE;
         if chunk_idx < self.chunks.len() {
             Ok(self.chunks[chunk_idx][offset])
         } else {
             Ok(self.tail[offset])
+        }
+    }
+
+    pub(crate) fn get_group(&self, start: usize, count: usize, out: &mut [Hash]) {
+        let chunk_idx = start / CHUNK_SIZE;
+        let offset = start % CHUNK_SIZE;
+        if offset + count <= CHUNK_SIZE {
+            let src = if chunk_idx < self.chunks.len() {
+                &self.chunks[chunk_idx][offset..offset + count]
+            } else {
+                &self.tail[offset..offset + count]
+            };
+            out[..count].copy_from_slice(src);
+        } else {
+            for (i, item) in out.iter_mut().enumerate().take(count) {
+                *item = self.get(start + i).expect("checked prev; qed");
+            }
         }
     }
 
@@ -375,19 +411,18 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         for level in 0..depth {
             inner.levels[level].set(idx, node)?;
 
-            let child_pos = idx.checked_rem(N).ok_or(TreeError::MathError)?;
+            let child_pos = idx % N;
             if child_pos != 0 {
-                let group_start =
-                    idx.checked_sub(child_pos).ok_or(TreeError::MathError)?;
-                let count = child_pos.checked_add(1).ok_or(TreeError::MathError)?;
+                let group_start = idx - child_pos;
+                let count = child_pos + 1;
                 let mut children = [[0u8; 32]; N];
-                for (i, slot) in children.iter_mut().enumerate().take(count) {
-                    *slot = inner.levels[level]
-                        .get(group_start.checked_add(i).ok_or(TreeError::MathError)?)?;
+                if child_pos > 0 {
+                    inner.levels[level].get_group(group_start, child_pos, &mut children);
                 }
+                children[child_pos] = node;
                 node = hasher.hash_children(&children[..count]);
             }
-            idx = idx.checked_div(N).ok_or(TreeError::MathError)?;
+            idx /= N;
         }
 
         if depth < MAX_DEPTH {
@@ -407,22 +442,14 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         level_len: usize,
         hasher: &H,
     ) -> Result<Hash, TreeError> {
-        let group_start = parent_idx.checked_mul(N).ok_or(TreeError::MathError)?;
-        let group_end = core::cmp::min(
-            group_start.checked_add(N).ok_or(TreeError::MathError)?,
-            level_len,
-        );
-        let count = group_end
-            .checked_sub(group_start)
-            .ok_or(TreeError::MathError)?;
+        let group_start = parent_idx * N;
+        let group_end = core::cmp::min(group_start + N, level_len);
+        let count = group_end - group_start;
         if count == 1 {
             child_level.get(group_start)
         } else {
             let mut children = [[0u8; 32]; N];
-            for (i, slot) in children.iter_mut().enumerate().take(count) {
-                *slot = child_level
-                    .get(group_start.checked_add(i).ok_or(TreeError::MathError)?)?;
-            }
+            child_level.get_group(group_start, count, &mut children);
             Ok(hasher.hash_children(&children[..count]))
         }
     }
@@ -442,7 +469,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         for parent_idx in start_parent..num_parents {
             let parent =
                 Self::_compute_parent(&levels[level], parent_idx, level_len, hasher)?;
-            let next_level = level.checked_add(1).ok_or(TreeError::MathError)?;
+            let next_level = level + 1;
             if next_level < levels.len() {
                 levels[next_level].set(parent_idx, parent)?;
             }
@@ -488,8 +515,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         inner.levels[0].extend(leaves)?;
 
         let old_size_usize = u64_to_usize(inner.size)?;
-        let mut start_parent =
-            old_size_usize.checked_div(N).ok_or(TreeError::MathError)?;
+        let mut start_parent = old_size_usize / N;
 
         let mut root = if depth == 0 {
             inner.levels[0].get(0)?
@@ -500,46 +526,41 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         for level in 0..depth {
             let level_len = inner.levels[level].len;
             let num_parents = level_len.div_ceil(N);
-            let is_root_level =
-                level.checked_add(1).ok_or(TreeError::MathError)? == depth;
+            let is_root_level = level + 1 == depth;
 
             #[cfg(feature = "parallel")]
             {
-                let work = num_parents
-                    .checked_sub(start_parent)
-                    .ok_or(TreeError::MathError)?;
+                let work = num_parents - start_parent;
                 if work >= Self::_parallel_threshold() {
                     use rayon::prelude::*;
 
-                    let split_at = level.checked_add(1).ok_or(TreeError::MathError)?;
+                    let split_at = level + 1;
                     let (child_levels, parent_levels) =
                         inner.levels.split_at_mut(split_at);
                     let child_level = &child_levels[level];
 
-                    let results: Vec<Result<(usize, Hash), TreeError>> = (start_parent
+                    let parents: Result<Vec<Hash>, TreeError> = (start_parent
                         ..num_parents)
                         .into_par_iter()
                         .map(|parent_idx| {
-                            let hash = Self::_compute_parent(
+                            Self::_compute_parent(
                                 child_level,
                                 parent_idx,
                                 level_len,
                                 hasher,
-                            )?;
-                            Ok((parent_idx, hash))
+                            )
                         })
                         .collect();
+                    let parents = parents?;
 
                     let parent_level = &mut parent_levels[0];
-                    for result in &results {
-                        let &(idx, hash) = result.as_ref().map_err(|e| e.clone())?;
-                        let next_level =
-                            level.checked_add(1).ok_or(TreeError::MathError)?;
-                        if next_level < MAX_DEPTH {
-                            parent_level.set(idx, hash)?;
+                    for (i, &parent) in parents.iter().enumerate() {
+                        let parent_idx = start_parent + i;
+                        if split_at < MAX_DEPTH {
+                            parent_level.set(parent_idx, parent)?;
                         }
                         if is_root_level {
-                            root = hash;
+                            root = parent;
                         }
                     }
                 } else {
@@ -568,7 +589,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
                 &mut root,
             )?;
 
-            start_parent = start_parent.checked_div(N).ok_or(TreeError::MathError)?;
+            start_parent /= N;
         }
 
         inner.root = Some(root);
@@ -874,6 +895,30 @@ mod tests {
     fn insert_many_empty_batch_error() {
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
         assert_eq!(tree.insert_many(&[]), Err(TreeError::EmptyBatch));
+    }
+
+    #[test]
+    fn insert_many_chunk_boundary() {
+        let leaves: Vec<Hash> = (0..CHUNK_SIZE)
+            .map(|i| {
+                let mut h = [0u8; 32];
+                let bytes = (i as u64).to_le_bytes();
+                h[..8].copy_from_slice(&bytes);
+                h
+            })
+            .collect();
+
+        let mut seq = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        for &l in &leaves {
+            seq.insert(l).unwrap();
+        }
+
+        let mut batch = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        batch.insert_many(&leaves).unwrap();
+
+        assert_eq!(seq.root(), batch.root());
+        assert_eq!(seq.size(), batch.size());
+        assert_eq!(seq.size(), CHUNK_SIZE as u64);
     }
 
     #[test]

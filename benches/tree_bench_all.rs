@@ -20,10 +20,10 @@ fn bench_insert_many(n_values: Vec<usize>) {
                 #[divan::bench]
                 fn insert_many_n{{n}}_{{count}}(bencher: divan::Bencher) {
                     let leaves = generate_leaves({{count}});
-                    let tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
                     bencher
                         .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .bench_local(|| {
+                        .with_inputs(|| LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher))
+                        .bench_local_refs(|tree| {
                             divan::black_box(tree.insert_many(&leaves).unwrap());
                         });
                 }
@@ -45,11 +45,14 @@ fn bench_insert_incremental(n_values: Vec<usize>) {
                     let all_leaves = generate_leaves({{count}});
                     let half = {{count}} / 2;
                     let (first_half, second_half) = all_leaves.split_at(half);
-                    let tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
                     bencher
                         .counter(divan::counter::ItemsCount::new(second_half.len()))
-                        .bench_local(|| {
+                        .with_inputs(|| {
+                            let tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
                             tree.insert_many(first_half).unwrap();
+                            tree
+                        })
+                        .bench_local_refs(|tree| {
                             divan::black_box(tree.insert_many(second_half).unwrap());
                         });
                 }
@@ -71,8 +74,8 @@ fn bench_concurrent_contention(n_values: Vec<usize>) {
                     let leaves = generate_leaves({{count}});
                     bencher
                         .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .bench_local(|| {
-                            let tree = Arc::new(LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher));
+                        .with_inputs(|| Arc::new(LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher)))
+                        .bench_local_values(|tree| {
                             std::thread::scope(|s| {
                                 for _ in 0..4 {
                                     let tree = Arc::clone(&tree);
