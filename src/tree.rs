@@ -457,7 +457,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     fn _parallel_threshold() -> usize {
         static THRESHOLD: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
         *THRESHOLD.get_or_init(|| {
-            std::env::var("ROTORTRee_PARALLEL_THRESHOLD")
+            std::env::var("ROTORTREE_PARALLEL_THRESHOLD")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(64)
