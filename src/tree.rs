@@ -128,11 +128,81 @@ impl ChunkedLevel {
         Ok(())
     }
 
-    /// Append a slice of hashes.
     fn extend(&mut self, values: &[Hash]) -> Result<(), TreeError> {
-        for &v in values {
-            self.push(v)?;
+        if values.is_empty() {
+            return Ok(());
         }
+        let new_len = self
+            .len
+            .checked_add(values.len())
+            .ok_or(TreeError::MathError)?;
+        let mut remaining = values;
+
+        // fill current tail
+        if self.tail_len > 0 {
+            let space = CHUNK_SIZE - self.tail_len;
+            let to_copy = space.min(remaining.len());
+            self.tail[self.tail_len..self.tail_len + to_copy]
+                .copy_from_slice(&remaining[..to_copy]);
+            self.tail_len += to_copy;
+            remaining = &remaining[to_copy..];
+            if self.tail_len == CHUNK_SIZE {
+                self.promote_tail();
+            }
+        }
+
+        // dont use tail for full chunks
+        let full_chunks = remaining.len() / CHUNK_SIZE;
+        if full_chunks > 0 {
+            self.chunks.reserve(full_chunks);
+            for i in 0..full_chunks {
+                let start = i * CHUNK_SIZE;
+                let chunk: [Hash; CHUNK_SIZE] = remaining[start..start + CHUNK_SIZE]
+                    .try_into()
+                    .expect("slice len == CHUNK_SIZE; qed");
+                self.chunks.push(Arc::new(chunk));
+            }
+            remaining = &remaining[full_chunks * CHUNK_SIZE..];
+        }
+
+        // tail remainder
+        if !remaining.is_empty() {
+            self.tail[..remaining.len()].copy_from_slice(remaining);
+            self.tail_len = remaining.len();
+        }
+
+        self.len = new_len;
+        Ok(())
+    }
+
+    fn ensure_len(&mut self, target: usize) -> Result<(), TreeError> {
+        if self.len >= target {
+            return Ok(());
+        }
+        let needed = target - self.len;
+
+        let tail_space = CHUNK_SIZE - self.tail_len;
+        let fill_tail = tail_space.min(needed);
+        self.tail_len += fill_tail;
+        let mut filled = fill_tail;
+        if self.tail_len == CHUNK_SIZE {
+            self.promote_tail();
+        }
+
+        let remaining = needed - filled;
+        let full_chunks = remaining / CHUNK_SIZE;
+        if full_chunks > 0 {
+            self.chunks.reserve(full_chunks);
+            for _ in 0..full_chunks {
+                self.chunks.push(Arc::new([[0u8; 32]; CHUNK_SIZE]));
+            }
+            filled += full_chunks * CHUNK_SIZE;
+        }
+
+        let leftover = needed - filled;
+        self.tail_len += leftover;
+
+        self.len = target;
         Ok(())
     }
 
@@ -514,6 +584,18 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
         inner.levels[0].extend(leaves)?;
 
+        // allocate upfront
+        {
+            let mut level_len = inner.levels[0].len;
+            for level in 0..depth {
+                let num_parents = level_len.div_ceil(N);
+                if level + 1 < MAX_DEPTH {
+                    inner.levels[level + 1].ensure_len(num_parents)?;
+                }
+                level_len = num_parents;
+            }
+        }
+
         let old_size_usize = u64_to_usize(inner.size)?;
         let mut start_parent = old_size_usize / N;
 
@@ -531,7 +613,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
             #[cfg(feature = "parallel")]
             {
                 let work = num_parents - start_parent;
-                if work >= Self::_parallel_threshold() {
+                if work >= Self::_parallel_threshold() && level == 0 {
                     use rayon::prelude::*;
 
                     let split_at = level + 1;

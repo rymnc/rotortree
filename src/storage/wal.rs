@@ -70,6 +70,8 @@ fn write_frame_serialized<
         "WAL entry exceeds maximum frame size ({size} > {MAX_FRAME_PAYLOAD})"
     );
 
+    #[allow(clippy::cast_possible_truncation)] // its fine :)
+    buf.reserve(size as usize + 8);
     let start = buf.len();
     buf.extend_from_slice(
         &(u32::try_from(size).expect("dont expect to write more than u32::MAX; qed"))
