@@ -52,3 +52,7 @@ required-features = ["concurrent", "parallel"]
 name = "tree_bench_storage"
 harness = false
 required-features = ["storage"]
+
+[profile.profiling]
+inherits = "release"
+debug = true
