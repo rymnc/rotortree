@@ -2,7 +2,6 @@
 #![cfg_attr(feature = "docs", doc = include_utils::include_md!("README.md:design"))]
 #![cfg_attr(feature = "docs", doc = include_utils::include_md!("README.md:usage"))]
 #![cfg_attr(feature = "docs", doc = include_utils::include_md!("README.md:devnote"))]
-
 #![cfg_attr(not(test), deny(clippy::cast_possible_truncation))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(unused_crate_dependencies)]
