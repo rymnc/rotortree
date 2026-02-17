@@ -55,3 +55,9 @@ jobs:
         with:
           tool: cargo-hack,cargo-nextest
       - run: cargo hack nextest run --feature-powerset
+      - name: Upload Proptest Regressions Artifact (Optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: proptest-regressions
+          path: proptest-regressions
+          if-no-files-found: ignore
