@@ -6,6 +6,7 @@ license = "MIT"
 rust-version = "1.90.0"
 repository = "https://github.com/rymnc/rotortree"
 readme = "README.md"
+description = "rotortree: a fast n-ary leanIMT implementation with persistence"
 
 [features]
 default = ["blake3"]
