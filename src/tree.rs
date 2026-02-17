@@ -341,10 +341,13 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
 pub struct LeanIMT<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
     hasher: H,
     #[cfg(not(feature = "concurrent"))]
+    #[cfg_attr(docsrs, doc(cfg(not(feature = "concurrent"))))]
     inner: TreeInner<N, MAX_DEPTH>,
     #[cfg(feature = "concurrent")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     inner: parking_lot::Mutex<TreeInner<N, MAX_DEPTH>>,
     #[cfg(feature = "concurrent")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     snapshot: arc_swap::ArcSwap<TreeSnapshot<N, MAX_DEPTH>>,
 }
 
@@ -365,6 +368,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
     /// Create a new empty tree
     #[cfg(feature = "concurrent")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn new(hasher: H) -> Self {
         let () = Self::_ASSERT_N;
         let () = Self::_ASSERT_DEPTH;
@@ -385,6 +389,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
     /// Insert a single leaf. Returns the new Merkle root.
     #[cfg(feature = "concurrent")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn insert(&self, leaf: Hash) -> Result<Hash, TreeError> {
         let mut inner = self.inner.lock();
         let root = Self::_insert(&mut inner, &self.hasher, leaf)?;
@@ -401,6 +406,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
     /// Insert multiple leaves in a batch. Returns the new root.
     #[cfg(feature = "concurrent")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn insert_many(&self, leaves: &[Hash]) -> Result<Hash, TreeError> {
         let mut inner = self.inner.lock();
         let root = Self::_insert_many(&mut inner, &self.hasher, leaves)?;
@@ -417,6 +423,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
     /// The current Merkle root, or `None` if the tree is empty.
     #[cfg(feature = "concurrent")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn root(&self) -> Option<Hash> {
         self.snapshot.load().root
     }
@@ -429,6 +436,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
     /// Number of leaves in the tree.
     #[cfg(feature = "concurrent")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn size(&self) -> u64 {
         self.snapshot.load().size
     }
@@ -441,6 +449,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
     /// Current depth (hash layers above the leaf level).
     #[cfg(feature = "concurrent")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn depth(&self) -> usize {
         self.snapshot.load().depth
     }
@@ -455,6 +464,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     ///
     /// Returns an `Arc` for lock-free sharing across threads.
     #[cfg(feature = "concurrent")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn snapshot(&self) -> Arc<TreeSnapshot<N, MAX_DEPTH>> {
         self.snapshot.load_full()
     }
@@ -551,6 +561,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     }
 
     #[cfg(feature = "parallel")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "parallel")))]
     fn _parallel_threshold() -> usize {
         static THRESHOLD: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
         *THRESHOLD.get_or_init(|| {

@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.90.0"
+repository = "https://github.com/rymnc/rotortree"
+readme = "README.md"
 
 [features]
 default = ["blake3"]
@@ -13,6 +15,7 @@ std = ["blake3?/std", "wincode?/std", "crc-fast?/std"]
 concurrent = ["std", "dep:parking_lot", "dep:arc-swap"]
 parallel = ["std", "dep:rayon"]
 storage = ["std", "dep:parking_lot", "dep:arc-swap", "wincode", "dep:crc-fast", "dep:fs2"]
+docs = ["dep:include-utils"]
 
 [dependencies]
 blake3 = { version = "1", default-features = false, optional = true }
@@ -22,6 +25,7 @@ arc-swap = { version = "1", optional = true }
 rayon = { version = "1", optional = true }
 crc-fast = { version = "1.10", default-features = false, optional = true }
 fs2 = { version = "0.4", optional = true }
+include-utils = { version = "0.2.4", optional = true }
 
 [dev-dependencies]
 proptest = "1"
@@ -56,3 +60,7 @@ required-features = ["storage"]
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

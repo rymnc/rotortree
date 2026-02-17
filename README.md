@@ -7,16 +7,21 @@
 
 brrrrrr
 
+<!-- ANCHOR: intro --> 
 > [!NOTE]
 > this database is a research experiment building on first principles of architecting and specializing a database, inspired by a few techniques mentioned in [Database Internals: A Deep Dive Into How Distributed Data Systems Work](https://www.oreilly.com/library/view/database-internals/9781492040330/) 
 
 _Most_ of the privacy protocols reuse popular/production ready databases, such as rocksdb, postgres, etc, however, they may not be suitable for high performance use-cases, which is also why layerzero created [qmdb](https://arxiv.org/pdf/2501.05262) to achieve high throughput. 
 their design is different than _rotortree_, because we focus on append only merkle trees here, and we do not support updating any leaves in-place.
 
+<!-- ANCHOR_END: intro --> 
+
 > [!WARNING]
 > this approach makes **MANY** tradeoffs, and is not suitable for production **AT ALL!!!**
 
 the tree design itself is heavily inspired by [lean-imt](https://zkkit.org/leanimt-paper.pdf) based on the great work by cedoor & vivian @ [PSE](https://pse.dev), this design was chosen so that it can have functional equivalents in zk dsls' and solidity. however, the main deviation is that here we implement an n-ary leanimt :) the intuition here is to reduce the depth, but maintain the same amount of total leaves. this also allows us to efficiently make use of on-disk storage blocks by grouping leaves together. 
+
+<!-- ANCHOR: design --> 
 
 ## Design decisions
 
@@ -35,6 +40,10 @@ the tree design itself is heavily inspired by [lean-imt](https://zkkit.org/leani
   - in most cases, you just need the tree in memory without crash persistence (as long as there is a bootstrapping sync mechanism), just use the single threaded variant, its _MUCH_ better if you have a low number of insertions
   - for this reason, one cannot do an apples to apples comparison of this impl with other merkle tree dbs which write and read from the disk. here the writes are to the wal + memory and reads are only from memory
 - few dependencies ~ 65 (active + transitive, excluding dev deps)
+
+<!-- ANCHOR_END: design --> 
+
+<!-- ANCHOR: usage --> 
 
 ## Usage
 
@@ -116,6 +125,8 @@ tree.close().unwrap();
 - `BatchSize(n)`: fsync after every `n` buffered entries
 - `Manual`: caller controls flushing via `tree.flush()` (works well if you're following a blockchain as the canonical source of state transitions)
 
+<!-- ANCHOR_END: usage --> 
+
 ## Development
 
 ### Prerequisites
@@ -188,7 +199,11 @@ with MAX_DEPTH=32
 
 peak insertions/sec is ~ 115.9M leaves/sec, overall, the design scales well with increased branching factor + parallelism
 
+<!-- ANCHOR: devnote --> 
+
 there seems to be some performance variance with the storage feature enabled, assume due to some contention. the pure in-memory benchmark (tree_bench_parallel) exhibits much lesser variance, and achieves peak throughput upto ~140M leaves/sec; why would anyone need this much? i do not know myself. single threaded by far has the best performance characteristic in terms of variance though, useful to keep in mind if that is a constraint; trading off performance for predictability under load.
+
+<!-- ANCHOR_END: devnote --> 
 
 > [!NOTE]
 > There are more realistic benchmarks that simulate performance under load, i.e concurrent reads / proof generation + insertions 
