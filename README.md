@@ -162,29 +162,29 @@ there are some feature flagged benchmarks, refer to the [Cargo.toml entry](Cargo
 Test bench: M4 pro, 14c 48g 
 
 ```
-RUSTFLAGS="-C target-cpu=native" cargo bench tree_bench_storage::insert_many --features storage
+RUSTFLAGS="-C target-cpu=native" cargo bench tree_bench_storage::insert_many --features storage,parallel
 ```
 
 | Benchmark | Fastest | Slowest | Median | Mean | Samples | Iters |
 |---|---|---|---|---|---|---|
-| insert_many_n2_1000 | 84.91 µs (11.77 Mitem/s) | 107.5 µs (9.295 Mitem/s) | 94.31 µs (10.6 Mitem/s) | 94.28 µs (10.6 Mitem/s) | 100 | 100 |
-| insert_many_n2_10000 | 802.2 µs (12.46 Mitem/s) | 1.059 ms (9.442 Mitem/s) | 847 µs (11.8 Mitem/s) | 846.8 µs (11.8 Mitem/s) | 100 | 100 |
-| insert_many_n2_100000 | 7.822 ms (12.78 Mitem/s) | 9.328 ms (10.71 Mitem/s) | 8.451 ms (11.83 Mitem/s) | 8.537 ms (11.71 Mitem/s) | 100 | 100 |
-| insert_many_n2_1000000 | 80.59 ms (12.4 Mitem/s) | 99.05 ms (10.09 Mitem/s) | 90.02 ms (11.1 Mitem/s) | 90 ms (11.11 Mitem/s) | 100 | 100 |
-| insert_many_n4_1000 | 52.2 µs (19.15 Mitem/s) | 103.9 µs (9.623 Mitem/s) | 61.12 µs (16.35 Mitem/s) | 59.8 µs (16.72 Mitem/s) | 100 | 100 |
-| insert_many_n4_10000 | 461.8 µs (21.65 Mitem/s) | 939.3 µs (10.64 Mitem/s) | 528.9 µs (18.9 Mitem/s) | 532.6 µs (18.77 Mitem/s) | 100 | 100 |
-| insert_many_n4_100000 | 4.808 ms (20.79 Mitem/s) | 5.899 ms (16.95 Mitem/s) | 5.272 ms (18.96 Mitem/s) | 5.274 ms (18.95 Mitem/s) | 100 | 100 |
-| insert_many_n4_1000000 | 49.72 ms (20.11 Mitem/s) | 62.7 ms (15.94 Mitem/s) | 56.5 ms (17.69 Mitem/s) | 56.24 ms (17.77 Mitem/s) | 100 | 100 |
-| insert_many_n8_1000 | 44.83 µs (22.3 Mitem/s) | 64.12 µs (15.59 Mitem/s) | 51.08 µs (19.57 Mitem/s) | 50.31 µs (19.87 Mitem/s) | 100 | 100 |
-| insert_many_n8_10000 | 376.2 µs (26.58 Mitem/s) | 807.9 µs (12.37 Mitem/s) | 442.5 µs (22.59 Mitem/s) | 442.7 µs (22.58 Mitem/s) | 100 | 100 |
-| insert_many_n8_100000 | 4.031 ms (24.8 Mitem/s) | 4.854 ms (20.6 Mitem/s) | 4.412 ms (22.66 Mitem/s) | 4.419 ms (22.62 Mitem/s) | 100 | 100 |
-| insert_many_n8_1000000 | 41.44 ms (24.12 Mitem/s) | 55.65 ms (17.96 Mitem/s) | 47.64 ms (20.98 Mitem/s) | 47.52 ms (21.04 Mitem/s) | 100 | 100 |
-| insert_many_n16_1000 | 41.91 µs (23.85 Mitem/s) | 257.4 µs (3.884 Mitem/s) | 48.33 µs (20.68 Mitem/s) | 50.37 µs (19.85 Mitem/s) | 100 | 100 |
-| insert_many_n16_10000 | **362.5 µs (27.58 Mitem/s)** | 784.8 µs (12.74 Mitem/s) | 413.6 µs (24.17 Mitem/s) | 420.4 µs (23.78 Mitem/s) | 100 | 100 |
-| insert_many_n16_100000 | 3.767 ms (26.54 Mitem/s) | 4.567 ms (21.89 Mitem/s) | 4.087 ms (24.46 Mitem/s) | 4.098 ms (24.39 Mitem/s) | 100 | 100 |
-| insert_many_n16_1000000 | 38.34 ms (26.07 Mitem/s) | 49.58 ms (20.16 Mitem/s) | 44.12 ms (22.66 Mitem/s) | 43.86 ms (22.79 Mitem/s) | 100 | 100 |
+| insert_many_n2_1000 | 130.1 µs (7.682 Mitem/s) | 494.9 µs (2.02 Mitem/s) | 223 µs (4.483 Mitem/s) | 232.8 µs (4.293 Mitem/s) | 100 | 100 |
+| insert_many_n2_10000 | 704.6 µs (14.19 Mitem/s) | 1.839 ms (5.436 Mitem/s) | 907.7 µs (11.01 Mitem/s) | 945 µs (10.58 Mitem/s) | 100 | 100 |
+| insert_many_n2_100000 | 3.153 ms (31.7 Mitem/s) | 5.393 ms (18.53 Mitem/s) | 3.996 ms (25.02 Mitem/s) | 4.105 ms (24.35 Mitem/s) | 100 | 100 |
+| insert_many_n2_1000000 | 22.8 ms (43.84 Mitem/s) | 49.19 ms (20.32 Mitem/s) | 32.16 ms (31.09 Mitem/s) | 32.21 ms (31.03 Mitem/s) | 100 | 100 |
+| insert_many_n4_1000 | 62.74 µs (15.93 Mitem/s) | 382.6 µs (2.613 Mitem/s) | 120.3 µs (8.305 Mitem/s) | 135.4 µs (7.384 Mitem/s) | 100 | 100 |
+| insert_many_n4_10000 | 351.4 µs (28.44 Mitem/s) | 1.445 ms (6.917 Mitem/s) | 496.4 µs (20.14 Mitem/s) | 545.6 µs (18.32 Mitem/s) | 100 | 100 |
+| insert_many_n4_100000 | 1.78 ms (56.15 Mitem/s) | 4.148 ms (24.1 Mitem/s) | 2.379 ms (42.01 Mitem/s) | 2.406 ms (41.54 Mitem/s) | 100 | 100 |
+| insert_many_n4_1000000 | 14.37 ms (69.57 Mitem/s) | 31.68 ms (31.56 Mitem/s) | 20.84 ms (47.96 Mitem/s) | 20.63 ms (48.45 Mitem/s) | 100 | 100 |
+| insert_many_n8_1000 | 51.58 µs (19.38 Mitem/s) | 346.4 µs (2.886 Mitem/s) | 95.45 µs (10.47 Mitem/s) | 113 µs (8.842 Mitem/s) | 100 | 100 |
+| insert_many_n8_10000 | 183.3 µs (54.53 Mitem/s) | 1.04 ms (9.608 Mitem/s) | 365 µs (27.39 Mitem/s) | 392.3 µs (25.49 Mitem/s) | 100 | 100 |
+| insert_many_n8_100000 | 1.362 ms (73.37 Mitem/s) | 2.631 ms (37.99 Mitem/s) | 1.861 ms (53.72 Mitem/s) | 1.879 ms (53.19 Mitem/s) | 100 | 100 |
+| insert_many_n8_1000000 | 11.87 ms (84.24 Mitem/s) | 29.15 ms (34.29 Mitem/s) | 17.28 ms (57.86 Mitem/s) | 17.15 ms (58.27 Mitem/s) | 100 | 100 |
+| insert_many_n16_1000 | 42.04 µs (23.78 Mitem/s) | 57.2 µs (17.48 Mitem/s) | 44.04 µs (22.7 Mitem/s) | 44.12 µs (22.66 Mitem/s) | 100 | 100 |
+| insert_many_n16_10000 | 248.9 µs (40.16 Mitem/s) | 809.5 µs (12.35 Mitem/s) | 310.4 µs (32.21 Mitem/s) | 334.3 µs (29.9 Mitem/s) | 100 | 100 |
+| insert_many_n16_100000 | 1.28 ms (78.1 Mitem/s) | 2.039 ms (49.03 Mitem/s) | 1.632 ms (61.26 Mitem/s) | 1.633 ms (61.2 Mitem/s) | 100 | 100 |
+| insert_many_n16_1000000 | **10.85 ms (92.1 Mitem/s)** | 22.16 ms (45.11 Mitem/s) | 15.97 ms (62.57 Mitem/s) | 15.8 ms (63.28 Mitem/s) | 100 | 100 |
 
-peak insertions/sec is ~ 27.58 Million/sec this gives us quite some room for a read-through cache incase we want to make use of larger trees
+peak insertions/sec is ~ 92.1 Million leaves/sec this gives us quite some room for a read-through cache incase we want to make use of larger trees
 
 > [!NOTE]
 > There are more realistic benchmarks that simulate performance under load, i.e concurrent reads / proof generation + insertions 
@@ -193,3 +193,4 @@ peak insertions/sec is ~ 27.58 Million/sec this gives us quite some room for a r
 
 1. optimize `ceil_log_n` by precomputing the table; 
 2. currently working on the design for the checkpointing mechanism to prevent unbounded growth of the wal
+3. reduce performance variance across benchmark samples
