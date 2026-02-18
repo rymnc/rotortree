@@ -201,7 +201,7 @@ peak insertions/sec is ~ 115.9M leaves/sec, overall, the design scales well with
 
 <!-- ANCHOR: devnote --> 
 
-there seems to be some performance variance with the storage feature enabled, assume due to some contention. the pure in-memory benchmark (tree_bench_parallel) exhibits much lesser variance, and achieves peak throughput upto ~140M leaves/sec; why would anyone need this much? i do not know myself. single threaded by far has the best performance characteristic in terms of variance though, useful to keep in mind if that is a constraint; trading off performance for predictability under load.
+there seems to be some performance variance with the storage feature enabled, assume due to some contention / outliers. the pure in-memory benchmark (tree_bench_parallel) exhibits much lesser variance, and achieves peak throughput upto ~140M leaves/sec; why would anyone need this much? i do not know myself. single threaded by far has the best performance characteristic in terms of variance though, useful to keep in mind if that is a constraint; trading off performance for predictability under load.
 
 <!-- ANCHOR_END: devnote --> 
 
@@ -212,4 +212,3 @@ there seems to be some performance variance with the storage feature enabled, as
 
 1. optimize `ceil_log_n` by precomputing the table; 
 2. currently working on the design for the checkpointing mechanism to prevent unbounded growth of the wal
-3. reduce performance variance across benchmark samples

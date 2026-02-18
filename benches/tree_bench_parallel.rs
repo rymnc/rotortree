@@ -21,7 +21,11 @@ fn bench_insert_many(n_values: Vec<usize>) {
                     let leaves = generate_leaves({{count}});
                     bencher
                         .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher))
+                        .with_inputs(|| {
+                            let tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
+                            rayon::broadcast(|_| {});
+                            tree
+                        })
                         .bench_local_refs(|tree| {
                             divan::black_box(tree.insert_many(&leaves).unwrap());
                         });
@@ -44,7 +48,11 @@ fn bench_insert_many_chunked_100(n_values: Vec<usize>) {
                     let leaves = generate_leaves({{count}});
                     bencher
                         .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher))
+                        .with_inputs(|| {
+                            let tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
+                            rayon::broadcast(|_| {});
+                            tree
+                        })
                         .bench_local_refs(|tree| {
                             for chunk in leaves.chunks(100) {
                                 divan::black_box(tree.insert_many(chunk).unwrap());
@@ -69,7 +77,11 @@ fn bench_insert_many_chunked_1000(n_values: Vec<usize>) {
                     let leaves = generate_leaves({{count}});
                     bencher
                         .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher))
+                        .with_inputs(|| {
+                            let tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
+                            rayon::broadcast(|_| {});
+                            tree
+                        })
                         .bench_local_refs(|tree| {
                             for chunk in leaves.chunks(1000) {
                                 divan::black_box(tree.insert_many(chunk).unwrap());
@@ -99,6 +111,7 @@ fn bench_insert_incremental(n_values: Vec<usize>) {
                         .with_inputs(|| {
                             let mut tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
                             tree.insert_many(first_half).unwrap();
+                            rayon::broadcast(|_| {});
                             tree
                         })
                         .bench_local_refs(|tree| {

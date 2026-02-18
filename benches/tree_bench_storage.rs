@@ -63,6 +63,8 @@ fn bench_insert_many(n_values: Vec<usize>) {
                                 flush_policy: FlushPolicy::Manual,
                             };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
+                            #[cfg(feature = "parallel")]
+                            rayon::broadcast(|_| {});
                             (tree, dir)
                         })
                         .bench_local_refs(|(tree, _dir)| {
@@ -91,6 +93,8 @@ fn special_insert_many(bencher: divan::Bencher, n: usize) {
             };
             let tree =
                 RotorTree::<Blake3Hasher, 8, 11>::open(Blake3Hasher, config).unwrap();
+            #[cfg(feature = "parallel")]
+            rayon::broadcast(|_| {});
             (tree, dir)
         })
         .bench_local_refs(|(tree, _dir)| {
