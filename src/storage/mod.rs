@@ -1,10 +1,17 @@
+pub(crate) mod checkpoint;
+pub(crate) mod data;
 mod error;
+mod frame;
 mod recovery;
 mod token;
 mod wal;
 
 use std::{
-    io::Write,
+    io::{
+        Seek,
+        SeekFrom,
+        Write,
+    },
     path::PathBuf,
     sync::{
         Arc,
@@ -25,11 +32,17 @@ use crate::{
     Hasher,
     LeanIMT,
     tree::{
+        CHUNK_SIZE,
+        Chunk,
         TreeInner,
         TreeSnapshot,
     },
 };
 
+pub use checkpoint::{
+    CheckpointPolicy,
+    TieringConfig,
+};
 pub use error::{
     RotorTreeError,
     StorageError,
@@ -41,10 +54,14 @@ use token::DurabilityTracker;
 
 /// Configuration for opening a `RotorTree`
 pub struct RotorTreeConfig {
-    /// Directory path where the WAL file will be stored
+    /// Directory path where the WAL and data files are stored
     pub path: PathBuf,
     /// Controls when WAL entries are fsynced to disk
     pub flush_policy: FlushPolicy,
+    /// Controls when checkpoints are triggered
+    pub checkpoint_policy: CheckpointPolicy,
+    /// Controls which tree levels are kept in memory vs mmap'd
+    pub tiering: TieringConfig,
 }
 
 /// Controls when buffered WAL entries are fsynced to disk
@@ -61,6 +78,32 @@ impl Default for FlushPolicy {
     fn default() -> Self {
         Self::Interval(Duration::from_millis(10))
     }
+}
+
+/// Tracks per-level checkpoint state
+struct LevelFileState {
+    /// Number of chunks already written
+    checkpointed_chunks: usize,
+}
+
+/// level ordered checkpoint during snapshot
+struct LevelCheckpointData {
+    /// unwritten
+    new_chunks: Vec<Chunk>,
+    /// start from
+    from_chunk: usize,
+    total_chunks: usize,
+    tail: [Hash; CHUNK_SIZE],
+}
+
+/// checkpoint snapshot
+struct CheckpointSnap {
+    depth: usize,
+    leaf_count: u64,
+    last_seq: u64,
+    root_hash: Hash,
+    active_levels: usize,
+    level_data: Vec<LevelCheckpointData>,
 }
 
 /// Internal mutable state
@@ -80,7 +123,17 @@ struct Shared<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
     closed: AtomicBool,
     flush_failed: AtomicBool,
     flush_error: Mutex<Option<Arc<std::io::Error>>>,
+    checkpoint_failed: AtomicBool,
+    checkpoint_error: Mutex<Option<String>>,
     entry_count: AtomicUsize,
+    data_dir: PathBuf,
+    checkpoint_policy: CheckpointPolicy,
+    tiering: TieringConfig,
+    level_files: Mutex<Vec<LevelFileState>>,
+    entries_since_checkpoint: AtomicUsize,
+    uncheckpointed_memory_bytes: AtomicUsize,
+    checkpoint_requested: AtomicBool,
+    checkpoint_wake: (Mutex<()>, parking_lot::Condvar),
 }
 
 impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> {
@@ -103,7 +156,6 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
 
         match result {
             Ok(()) => {
-                // empty buf
                 let mut state = self.state.lock();
                 if state.buffer.is_empty() {
                     let mut returned = buf;
@@ -114,7 +166,6 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
                 Ok(())
             }
             Err(e) => {
-                // put back into buf
                 let mut state = self.state.lock();
                 if state.buffer.is_empty() {
                     state.buffer = buf;
@@ -141,7 +192,186 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
             });
             return Err(StorageError::FlushFailed(err));
         }
+        if self.checkpoint_failed.load(Ordering::Relaxed) {
+            let detail = self
+                .checkpoint_error
+                .lock()
+                .clone()
+                .unwrap_or_else(|| "unknown checkpoint error".to_string());
+            return Err(StorageError::CheckpointFailed(detail));
+        }
         Ok(())
+    }
+
+    fn checkpoint_inner(&self) -> Result<(), StorageError> {
+        // flush buffered wal entries
+        self.flush_inner()?;
+
+        let snap = {
+            let state = self.state.lock();
+            let level_files = self.level_files.lock();
+
+            let depth = state.inner.depth;
+            let leaf_count = state.inner.size;
+            let last_seq = state.next_seq.saturating_sub(1);
+
+            if leaf_count == 0 {
+                return Ok(());
+            }
+
+            let active_levels = depth.min(MAX_DEPTH - 1) + 1;
+            let mut level_data = Vec::with_capacity(active_levels);
+
+            for level_idx in 0..active_levels {
+                let total_chunks = state.inner.levels[level_idx].chunks().len();
+                let already = if level_idx < level_files.len() {
+                    level_files[level_idx].checkpointed_chunks
+                } else {
+                    0
+                };
+
+                let new_chunks: Vec<Chunk> =
+                    state.inner.levels[level_idx].chunks()[already..].to_vec();
+
+                let tail = *state.inner.levels[level_idx].tail_data();
+
+                level_data.push(LevelCheckpointData {
+                    new_chunks,
+                    from_chunk: already,
+                    total_chunks,
+                    tail,
+                });
+            }
+
+            let root_hash = state.inner.root.unwrap_or([0u8; 32]);
+
+            CheckpointSnap {
+                depth,
+                leaf_count,
+                last_seq,
+                root_hash,
+                active_levels,
+                level_data,
+            }
+        };
+
+        std::fs::create_dir_all(&self.data_dir)?;
+        if !self.data_dir.join("header.bin").exists() {
+            #[allow(clippy::cast_possible_truncation)]
+            checkpoint::write_header(&self.data_dir, N as u32, MAX_DEPTH as u32)?;
+        }
+
+        let mut level_file_handles: Vec<Option<std::fs::File>> =
+            (0..snap.active_levels).map(|_| None).collect();
+
+        for (level_idx, ld) in snap.level_data.iter().enumerate() {
+            if !ld.new_chunks.is_empty() {
+                let chunks_iter = ld.new_chunks.iter().map(|c| c.as_slice());
+                let file = checkpoint::append_chunks_to_level(
+                    &self.data_dir,
+                    level_idx,
+                    ld.from_chunk,
+                    chunks_iter,
+                )?;
+                level_file_handles[level_idx] = Some(file);
+            }
+        }
+
+        for file in level_file_handles.into_iter().flatten() {
+            file.sync_data()?;
+        }
+
+        let tails: Vec<[Hash; CHUNK_SIZE]> =
+            snap.level_data.iter().map(|ld| ld.tail).collect();
+        checkpoint::write_tails(&self.data_dir, &tails, MAX_DEPTH)?;
+
+        #[allow(clippy::cast_possible_truncation)]
+        checkpoint::write_meta(
+            &self.data_dir,
+            &checkpoint::CheckpointMeta {
+                n: N as u32,
+                max_depth: MAX_DEPTH as u32,
+                last_wal_seq: snap.last_seq,
+                leaf_count: snap.leaf_count,
+                depth: snap.depth as u32,
+                root_hash: snap.root_hash,
+            },
+        )?;
+
+        {
+            let mut wal_file = self.wal_file.lock();
+            let mut state = self.state.lock();
+            let mut level_files = self.level_files.lock();
+
+            while level_files.len() < snap.active_levels {
+                level_files.push(LevelFileState {
+                    checkpointed_chunks: 0,
+                });
+            }
+
+            for (level_idx, ld) in snap.level_data.iter().enumerate() {
+                let snapshot_total = ld.total_chunks;
+
+                if snapshot_total > 0
+                    && level_idx < self.tiering.pin_above_level
+                    && let Some(region) = checkpoint::mmap_level_file(
+                        &self.data_dir,
+                        level_idx,
+                        snapshot_total,
+                    )?
+                {
+                    let chunks = state.inner.levels[level_idx].chunks_mut();
+                    let remap_count = snapshot_total.min(chunks.len());
+                    for (chunk_idx, chunk) in
+                        chunks.iter_mut().enumerate().take(remap_count)
+                    {
+                        let offset = chunk_idx * checkpoint::CHUNK_BYTE_SIZE;
+                        *chunk = Chunk::new_mapped(Arc::clone(&region), offset);
+                    }
+                }
+
+                level_files[level_idx].checkpointed_chunks = snapshot_total;
+            }
+
+            // truncate wal
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                let header_buf = wal::serialize_header(N as u32, MAX_DEPTH as u32);
+                let wal = &mut *wal_file;
+                wal.seek(SeekFrom::Start(0))?;
+                wal.write_all(&header_buf)?;
+                wal.set_len(header_buf.len() as u64)?;
+                wal.sync_data()?;
+            }
+
+            self.entries_since_checkpoint.store(0, Ordering::Relaxed);
+            self.uncheckpointed_memory_bytes.store(0, Ordering::Relaxed);
+
+            let new_snap = state.inner.snapshot();
+            self.snapshot.store(Arc::new(new_snap));
+        }
+
+        Ok(())
+    }
+
+    /// depends on configured checkpoint policy
+    fn should_auto_checkpoint(&self) -> bool {
+        match &self.checkpoint_policy {
+            CheckpointPolicy::Manual | CheckpointPolicy::OnClose => false,
+            CheckpointPolicy::EveryNEntries(n) => {
+                self.entries_since_checkpoint.load(Ordering::Relaxed) as u64 >= *n
+            }
+            CheckpointPolicy::MemoryThreshold(bytes) => {
+                self.uncheckpointed_memory_bytes.load(Ordering::Relaxed) >= *bytes
+            }
+        }
+    }
+
+    /// offload checkpoint request
+    fn request_checkpoint(&self) {
+        self.checkpoint_requested.store(true, Ordering::Release);
+        let (_lock, cvar) = &self.checkpoint_wake;
+        cvar.notify_one();
     }
 }
 
@@ -151,27 +381,38 @@ struct FlushHandle {
     shutdown: Arc<(Mutex<bool>, parking_lot::Condvar)>,
 }
 
-/// Wraps the core tree with persistence via wal
-/// insertions go to an in-memory wal buffer, but the state is available for computing on immediately
-/// whenever flush() is called, configured via `FlushPolicy`, the buffer is written to the disk
+/// Handle for the background checkpoint thread
+struct CheckpointHandle {
+    handle: std::thread::JoinHandle<()>,
+}
+
+/// Wraps the core tree with persistence via WAL and optional checkpointing.
+///
+/// Insertions go to an in-memory WAL buffer, but the state is available for
+/// computing on immediately. When `flush()` is called (or triggered by
+/// `FlushPolicy`), the buffer is written to disk. Checkpoints materialize
+/// the tree state to data files, allowing WAL truncation and mmap-backed reads.
 pub struct RotorTree<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
     shared: Arc<Shared<H, N, MAX_DEPTH>>,
     flush_handle: Option<FlushHandle>,
+    checkpoint_handle: Option<CheckpointHandle>,
 }
 
 impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPTH> {
     const _ASSERT_N: () = assert!(N >= 2, "branching factor must be at least 2");
     const _ASSERT_DEPTH: () = assert!(MAX_DEPTH >= 1, "max depth must be at least 1");
 
-    /// Open or create a RotorTree at the given path
+    /// Open or create a RotorTree at the given path.
     ///
-    /// If a pre-existing wal is found, replays it to recover the tree state
+    /// If data files from a previous checkpoint exist, loads state from them
+    /// and replays only the WAL delta. Otherwise, replays the full WAL.
     pub fn open(hasher: H, config: RotorTreeConfig) -> Result<Self, RotorTreeError> {
         let () = Self::_ASSERT_N;
         let () = Self::_ASSERT_DEPTH;
 
         std::fs::create_dir_all(&config.path)?;
 
+        let data_dir = config.path.join("data");
         let wal_path = config.path.join("wal");
         let file = std::fs::OpenOptions::new()
             .read(true)
@@ -192,8 +433,19 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
         }
 
         let mut file = file;
-        let RecoveryResult { inner, next_seq } =
-            recovery::recover::<H, _, N, MAX_DEPTH>(&mut file, &hasher)?;
+
+        // recover from checkpoint first
+        let has_data_dir = data_dir.exists();
+        let RecoveryResult { inner, next_seq } = if has_data_dir {
+            recovery::recover_with_checkpoint::<H, _, N, MAX_DEPTH>(
+                &mut file, &hasher, &data_dir,
+            )?
+        } else {
+            recovery::recover::<H, _, N, MAX_DEPTH>(&mut file, &hasher)?
+        };
+
+        // Compute initial level file state from checkpoint metadata
+        let level_files = compute_initial_level_files::<N, MAX_DEPTH>(&data_dir)?;
 
         let snap = inner.snapshot();
         let durability = DurabilityTracker::new();
@@ -217,14 +469,26 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
             closed: AtomicBool::new(false),
             flush_failed: AtomicBool::new(false),
             flush_error: Mutex::new(None),
+            checkpoint_failed: AtomicBool::new(false),
+            checkpoint_error: Mutex::new(None),
             entry_count: AtomicUsize::new(0),
+            data_dir,
+            checkpoint_policy: config.checkpoint_policy,
+            tiering: config.tiering,
+            level_files: Mutex::new(level_files),
+            entries_since_checkpoint: AtomicUsize::new(0),
+            uncheckpointed_memory_bytes: AtomicUsize::new(0),
+            checkpoint_requested: AtomicBool::new(false),
+            checkpoint_wake: (Mutex::new(()), parking_lot::Condvar::new()),
         });
 
         let flush_handle = start_flush_thread(&shared, &config.flush_policy)?;
+        let checkpoint_handle = start_checkpoint_thread(&shared)?;
 
         Ok(Self {
             shared,
             flush_handle,
+            checkpoint_handle,
         })
     }
 
@@ -243,12 +507,19 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
             wal::serialize_entry(&mut state.buffer, seq, wal::WalPayload::Single(leaf));
             state.next_seq = state.next_seq.checked_add(1).expect("seq overflow; qed");
             self.shared.entry_count.fetch_add(1, Ordering::Relaxed);
+            self.shared
+                .entries_since_checkpoint
+                .fetch_add(1, Ordering::Relaxed);
+            self.shared
+                .uncheckpointed_memory_bytes
+                .fetch_add(32, Ordering::Relaxed);
             let snap = state.inner.snapshot();
             self.shared.snapshot.store(Arc::new(snap));
             let token = self.shared.durability.token(seq);
             (root, token)
         };
 
+        self.maybe_auto_checkpoint();
         Ok((root, token))
     }
 
@@ -274,12 +545,19 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
             );
             state.next_seq = state.next_seq.checked_add(1).expect("seq overflow; qed");
             self.shared.entry_count.fetch_add(1, Ordering::Relaxed);
+            self.shared
+                .entries_since_checkpoint
+                .fetch_add(1, Ordering::Relaxed);
+            self.shared
+                .uncheckpointed_memory_bytes
+                .fetch_add(leaves.len() * 32, Ordering::Relaxed);
             let snap = state.inner.snapshot();
             self.shared.snapshot.store(Arc::new(snap));
             let token = self.shared.durability.token(seq);
             (root, token)
         };
 
+        self.maybe_auto_checkpoint();
         Ok((root, token))
     }
 
@@ -317,6 +595,12 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
         self.shared.flush_inner()
     }
 
+    /// Write a checkpoint
+    pub fn checkpoint(&self) -> Result<(), StorageError> {
+        self.shared.check_closed()?;
+        self.shared.checkpoint_inner()
+    }
+
     /// Close the tree
     pub fn close(mut self) -> Result<(), StorageError> {
         self.close_inner()
@@ -325,6 +609,13 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
     fn close_inner(&mut self) -> Result<(), StorageError> {
         if self.shared.closed.swap(true, Ordering::AcqRel) {
             return Ok(());
+        }
+
+        if self.checkpoint_handle.is_some() {
+            self.shared.request_checkpoint(); // wake it so it sees `closed`
+            if let Some(handle) = self.checkpoint_handle.take() {
+                let _ = handle.handle.join();
+            }
         }
 
         if let Some(handle) = self.flush_handle.take() {
@@ -339,6 +630,11 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
 
         self.shared.flush_inner()?;
 
+        // checkpoint on close if configured
+        if matches!(self.shared.checkpoint_policy, CheckpointPolicy::OnClose) {
+            self.shared.checkpoint_inner()?;
+        }
+
         {
             let file = self.shared.wal_file.lock();
             let _ = fs2::FileExt::unlock(&*file);
@@ -346,6 +642,44 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
 
         Ok(())
     }
+
+    fn maybe_auto_checkpoint(&self) {
+        if self.shared.should_auto_checkpoint() {
+            self.shared.request_checkpoint();
+        }
+    }
+}
+
+fn compute_initial_level_files<const N: usize, const MAX_DEPTH: usize>(
+    data_dir: &std::path::Path,
+) -> Result<Vec<LevelFileState>, StorageError> {
+    let meta = match checkpoint::read_meta(data_dir) {
+        Ok(Some(m)) => m,
+        Ok(None) => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+
+    let leaf_count =
+        usize::try_from(meta.leaf_count).map_err(|_| StorageError::MathError)?;
+    let depth = meta.depth as usize;
+
+    if leaf_count == 0 {
+        return Ok(Vec::new());
+    }
+
+    let active_levels = depth.min(MAX_DEPTH - 1) + 1;
+    let mut result = Vec::with_capacity(active_levels);
+    let mut level_len = leaf_count;
+
+    for _ in 0..active_levels {
+        let chunks = level_len / CHUNK_SIZE;
+        result.push(LevelFileState {
+            checkpointed_chunks: chunks,
+        });
+        level_len = level_len.div_ceil(N);
+    }
+
+    Ok(result)
 }
 
 fn start_flush_thread<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
@@ -366,9 +700,7 @@ fn start_flush_thread<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
                         break;
                     }
                     drop(stop);
-                    if let Err(e) = shared.flush_inner() {
-                        eprintln!("rotortree: background flush error: {e}");
-                    }
+                    let _ = shared.flush_inner();
                 }
             })
         }
@@ -385,15 +717,55 @@ fn start_flush_thread<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
                         break;
                     }
                     drop(stop);
-                    if shared.entry_count.load(Ordering::Relaxed) >= threshold
-                        && let Err(e) = shared.flush_inner()
-                    {
-                        eprintln!("rotortree: background flush error: {e}");
+                    if shared.entry_count.load(Ordering::Relaxed) >= threshold {
+                        let _ = shared.flush_inner();
                     }
                 }
             })
         }
     }
+}
+
+fn start_checkpoint_thread<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
+    shared: &Arc<Shared<H, N, MAX_DEPTH>>,
+) -> Result<Option<CheckpointHandle>, RotorTreeError> {
+    if matches!(
+        shared.checkpoint_policy,
+        CheckpointPolicy::Manual | CheckpointPolicy::OnClose
+    ) {
+        return Ok(None);
+    }
+
+    let shared = Arc::clone(shared);
+    let handle = std::thread::Builder::new()
+        .name("rotortree-checkpoint".to_string())
+        .spawn(move || {
+            let (lock, cvar) = &shared.checkpoint_wake;
+            loop {
+                // Wait for a checkpoint request or shutdown.
+                {
+                    let mut guard = lock.lock();
+                    while !shared.checkpoint_requested.load(Ordering::Acquire)
+                        && !shared.closed.load(Ordering::Acquire)
+                    {
+                        cvar.wait(&mut guard);
+                    }
+                }
+                if shared.closed.load(Ordering::Acquire) {
+                    break;
+                }
+                shared.checkpoint_requested.store(false, Ordering::Relaxed);
+
+                if let Err(e) = shared.checkpoint_inner() {
+                    *shared.checkpoint_error.lock() = Some(e.to_string());
+                    shared.checkpoint_failed.store(true, Ordering::Relaxed);
+                    break;
+                }
+            }
+        })
+        .map_err(|e| RotorTreeError::Storage(StorageError::Io(e)))?;
+
+    Ok(Some(CheckpointHandle { handle }))
 }
 
 fn spawn_flush_thread<F>(body: F) -> Result<Option<FlushHandle>, RotorTreeError>
@@ -422,6 +794,10 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Drop
         }
         if std::thread::panicking() {
             self.shared.closed.store(true, Ordering::Release);
+            self.shared.request_checkpoint();
+            if let Some(handle) = self.checkpoint_handle.take() {
+                let _ = handle.handle.join();
+            }
             if let Some(handle) = self.flush_handle.take() {
                 let (lock, cvar) = &*handle.shutdown;
                 let mut shutdown = lock.lock();

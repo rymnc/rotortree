@@ -16,7 +16,81 @@ use crate::{
 };
 
 /// Number of hashes per chunk for structural sharing.
-const CHUNK_SIZE: usize = 128;
+pub(crate) const CHUNK_SIZE: usize = 128;
+
+/// Chunk wrapper
+#[derive(Clone)]
+pub(crate) struct Chunk(ChunkInner);
+
+#[derive(Clone)]
+enum ChunkInner {
+    Memory(Arc<[Hash; CHUNK_SIZE]>),
+    #[cfg(feature = "storage")]
+    Mapped {
+        region: Arc<crate::storage::data::MmapRegion>,
+        offset: usize,
+    },
+}
+
+impl Chunk {
+    /// Read the chunk's hashes
+    #[inline(always)]
+    pub(crate) fn as_slice(&self) -> &[Hash; CHUNK_SIZE] {
+        match &self.0 {
+            ChunkInner::Memory(arc) => arc,
+            #[cfg(feature = "storage")]
+            ChunkInner::Mapped { region, offset } => {
+                // SAFETY: offset validated at construction
+                unsafe { &*(region.as_ptr().add(*offset).cast::<[Hash; CHUNK_SIZE]>()) }
+            }
+        }
+    }
+
+    /// Get mutable access
+    #[inline(always)]
+    fn make_mut(&mut self) -> &mut [Hash; CHUNK_SIZE] {
+        #[cfg(feature = "storage")]
+        if matches!(&self.0, ChunkInner::Mapped { .. }) {
+            let data = *self.as_slice();
+            self.0 = ChunkInner::Memory(Arc::new(data));
+        }
+        match &mut self.0 {
+            ChunkInner::Memory(arc) => Arc::make_mut(arc),
+            #[cfg(feature = "storage")]
+            ChunkInner::Mapped { .. } => unreachable!(),
+        }
+    }
+
+    /// Create a new in-memory chunk
+    fn new_memory(data: [Hash; CHUNK_SIZE]) -> Self {
+        Self(ChunkInner::Memory(Arc::new(data)))
+    }
+
+    /// Create an mmap-ed chunk
+    #[cfg(feature = "storage")]
+    pub(crate) fn new_mapped(
+        region: Arc<crate::storage::data::MmapRegion>,
+        offset: usize,
+    ) -> Self {
+        const CHUNK_BYTE_SIZE: usize = CHUNK_SIZE * 32;
+        assert!(
+            offset + CHUNK_BYTE_SIZE <= region.valid_len(),
+            "Chunk::new_mapped: offset {offset} + {CHUNK_BYTE_SIZE} exceeds valid_len {}",
+            region.valid_len()
+        );
+        Self(ChunkInner::Mapped { region, offset })
+    }
+
+    /// only used in tests
+    #[cfg(test)]
+    fn ptr_eq(a: &Self, b: &Self) -> bool {
+        match (&a.0, &b.0) {
+            (ChunkInner::Memory(a), ChunkInner::Memory(b)) => Arc::ptr_eq(a, b),
+            #[cfg(feature = "storage")]
+            _ => false,
+        }
+    }
+}
 
 /// Returns the number of hash layers above the leaf level.
 ///
@@ -49,9 +123,9 @@ fn u64_to_usize(val: u64) -> Result<usize, TreeError> {
 /// Completed chunks are `Arc`-wrapped for zero-copy sharing with
 /// snapshots
 #[derive(Clone)]
-struct ChunkedLevel {
+pub(crate) struct ChunkedLevel {
     /// Immutable completed chunks, shared across snapshots.
-    chunks: Vec<Arc<[Hash; CHUNK_SIZE]>>,
+    chunks: Vec<Chunk>,
     /// Fixed-size tail buffer (partially filled).
     tail: [Hash; CHUNK_SIZE],
     /// Number of valid entries in `tail`.
@@ -75,7 +149,7 @@ impl ChunkedLevel {
         let chunk_idx = index / CHUNK_SIZE;
         let offset = index % CHUNK_SIZE;
         if chunk_idx < self.chunks.len() {
-            Ok(self.chunks[chunk_idx][offset])
+            Ok(self.chunks[chunk_idx].as_slice()[offset])
         } else {
             Ok(self.tail[offset])
         }
@@ -88,7 +162,7 @@ impl ChunkedLevel {
         let offset = start % CHUNK_SIZE;
         if offset + count <= CHUNK_SIZE {
             let src = if chunk_idx < self.chunks.len() {
-                &self.chunks[chunk_idx][offset..offset + count]
+                &self.chunks[chunk_idx].as_slice()[offset..offset + count]
             } else {
                 &self.tail[offset..offset + count]
             };
@@ -108,8 +182,7 @@ impl ChunkedLevel {
         let chunk_idx = index / CHUNK_SIZE;
         let offset = index % CHUNK_SIZE;
         if chunk_idx < self.chunks.len() {
-            let chunk = Arc::make_mut(&mut self.chunks[chunk_idx]);
-            chunk[offset] = value;
+            self.chunks[chunk_idx].make_mut()[offset] = value;
         } else {
             self.tail[offset] = value;
         }
@@ -160,7 +233,7 @@ impl ChunkedLevel {
                 let chunk: [Hash; CHUNK_SIZE] = remaining[start..start + CHUNK_SIZE]
                     .try_into()
                     .expect("slice len == CHUNK_SIZE; qed");
-                self.chunks.push(Arc::new(chunk));
+                self.chunks.push(Chunk::new_memory(chunk));
             }
             remaining = &remaining[full_chunks * CHUNK_SIZE..];
         }
@@ -194,7 +267,7 @@ impl ChunkedLevel {
         if full_chunks > 0 {
             self.chunks.reserve(full_chunks);
             for _ in 0..full_chunks {
-                self.chunks.push(Arc::new([[0u8; 32]; CHUNK_SIZE]));
+                self.chunks.push(Chunk::new_memory([[0u8; 32]; CHUNK_SIZE]));
             }
             filled += full_chunks * CHUNK_SIZE;
         }
@@ -209,9 +282,27 @@ impl ChunkedLevel {
     /// Promote the full tail into a chunk.
     fn promote_tail(&mut self) {
         debug_assert_eq!(self.tail_len, CHUNK_SIZE);
-        self.chunks.push(Arc::new(self.tail));
+        self.chunks.push(Chunk::new_memory(self.tail));
         self.tail = [[0u8; 32]; CHUNK_SIZE];
         self.tail_len = 0;
+    }
+
+    /// Access the committed chunks
+    #[cfg(feature = "storage")]
+    pub(crate) fn chunks(&self) -> &[Chunk] {
+        &self.chunks
+    }
+
+    /// Mutable access to the committed chunks
+    #[cfg(feature = "storage")]
+    pub(crate) fn chunks_mut(&mut self) -> &mut Vec<Chunk> {
+        &mut self.chunks
+    }
+
+    /// Access the tail buffer
+    #[cfg(feature = "storage")]
+    pub(crate) fn tail_data(&self) -> &[Hash; CHUNK_SIZE] {
+        &self.tail
     }
 
     /// Create a snapshot level
@@ -226,7 +317,7 @@ impl ChunkedLevel {
 
 /// Immutable view of a single tree level for proof generation.
 pub(crate) struct SnapshotLevel {
-    chunks: Vec<Arc<[Hash; CHUNK_SIZE]>>,
+    chunks: Vec<Chunk>,
     tail: [Hash; CHUNK_SIZE],
     len: usize,
 }
@@ -242,7 +333,7 @@ impl SnapshotLevel {
         let chunk_idx = index / CHUNK_SIZE;
         let offset = index % CHUNK_SIZE;
         if chunk_idx < self.chunks.len() {
-            Ok(self.chunks[chunk_idx][offset])
+            Ok(self.chunks[chunk_idx].as_slice()[offset])
         } else {
             Ok(self.tail[offset])
         }
@@ -253,7 +344,7 @@ impl SnapshotLevel {
         let offset = start % CHUNK_SIZE;
         if offset + count <= CHUNK_SIZE {
             let src = if chunk_idx < self.chunks.len() {
-                &self.chunks[chunk_idx][offset..offset + count]
+                &self.chunks[chunk_idx].as_slice()[offset..offset + count]
             } else {
                 &self.tail[offset..offset + count]
             };
@@ -299,7 +390,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
 /// Mutable tree state.
 pub(crate) struct TreeInner<const N: usize, const MAX_DEPTH: usize> {
     /// Levels 0..depth-1
-    levels: [ChunkedLevel; MAX_DEPTH],
+    pub(crate) levels: [ChunkedLevel; MAX_DEPTH],
     /// The root hash
     pub(crate) root: Option<Hash>,
     pub(crate) size: u64,
@@ -314,6 +405,66 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
             size: 0,
             depth: 0,
         }
+    }
+
+    /// Replace a level's contents from checkpoint data
+    #[cfg(feature = "storage")]
+    pub(crate) fn set_level_from_parts(
+        &mut self,
+        level_idx: usize,
+        chunks: Vec<Chunk>,
+        tail: [Hash; CHUNK_SIZE],
+        tail_len: usize,
+        len: usize,
+    ) {
+        self.levels[level_idx] = ChunkedLevel {
+            chunks,
+            tail,
+            tail_len,
+            len,
+        };
+    }
+
+    /// Recompute the root hash from level 0 data bottom-up
+    #[cfg(feature = "storage")]
+    pub(crate) fn recompute_root<H: Hasher>(&self, hasher: &H) -> Option<Hash> {
+        if self.size == 0 {
+            return None;
+        }
+        if self.size == 1 {
+            return self.levels[0].get(0).ok();
+        }
+
+        let depth = self.depth;
+        let level0_len = self.levels[0].len;
+        let mut current: Vec<Hash> = Vec::with_capacity(level0_len);
+        for i in 0..level0_len {
+            current.push(self.levels[0].get(i).ok()?);
+        }
+
+        for _level in 0..depth {
+            let len = current.len();
+            let num_parents = len.div_ceil(N);
+            let mut parents = Vec::with_capacity(num_parents);
+
+            for parent_idx in 0..num_parents {
+                let start = parent_idx * N;
+                let end = core::cmp::min(start + N, len);
+                let count = end - start;
+
+                if count == 1 {
+                    parents.push(current[start]);
+                } else {
+                    let mut children = [[0u8; 32]; N];
+                    children[..count].copy_from_slice(&current[start..end]);
+                    parents.push(hasher.hash_children(&children[..count]));
+                }
+            }
+
+            current = parents;
+        }
+
+        current.first().copied()
     }
 
     pub(crate) fn snapshot(&self) -> TreeSnapshot<N, MAX_DEPTH> {
@@ -803,7 +954,7 @@ mod tests {
         let snap = level.snapshot();
         assert_eq!(snap.len(), level.len);
         // The completed chunk Arc is shared.
-        assert!(Arc::ptr_eq(&level.chunks[0], &snap.chunks[0]));
+        assert!(Chunk::ptr_eq(&level.chunks[0], &snap.chunks[0]));
         // Data matches.
         for i in 0..level.len {
             assert_eq!(level.get(i).unwrap(), snap.get(i).unwrap());

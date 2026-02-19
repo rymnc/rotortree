@@ -15,7 +15,7 @@ wincode = ["dep:wincode"]
 std = ["blake3?/std", "wincode?/std", "crc-fast?/std"]
 concurrent = ["std", "dep:parking_lot", "dep:arc-swap"]
 parallel = ["std", "dep:rayon"]
-storage = ["std", "dep:parking_lot", "dep:arc-swap", "wincode", "dep:crc-fast", "dep:fs2"]
+storage = ["std", "dep:parking_lot", "dep:arc-swap", "wincode", "dep:crc-fast", "dep:fs2", "dep:memmap2"]
 docs = ["dep:include-utils"]
 
 [dependencies]
@@ -26,6 +26,7 @@ arc-swap = { version = "1", optional = true }
 rayon = { version = "1", optional = true }
 crc-fast = { version = "1.10", default-features = false, optional = true }
 fs2 = { version = "0.4", optional = true }
+memmap2 = { version = "0.9", optional = true }
 include-utils = { version = "0.2.4", optional = true }
 
 [dev-dependencies]

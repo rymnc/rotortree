@@ -53,10 +53,19 @@ pub use adapters::blake3::Blake3Hasher;
 #[cfg(feature = "storage")]
 #[cfg_attr(docsrs, doc(cfg(feature = "storage")))]
 pub use storage::{
+    CheckpointPolicy,
     DurabilityToken,
     FlushPolicy,
     RotorTree,
     RotorTreeConfig,
     RotorTreeError,
     StorageError,
+    TieringConfig,
 };
+
+#[cfg(feature = "storage")]
+#[doc(hidden)]
+pub use storage::checkpoint::write_test_meta;
+
+#[cfg(feature = "storage")]
+pub use storage::checkpoint::CheckpointMeta;

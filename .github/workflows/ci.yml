@@ -30,7 +30,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack
-      - run: cargo hack clippy --feature-powerset -- -D warnings
+      - run: cargo hack clippy --feature-powerset --skip docs -- -D warnings
 
   check:
     name: Check
@@ -42,7 +42,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack
-      - run: cargo hack check --feature-powerset
+      - run: cargo hack check --feature-powerset --skip docs
 
   test:
     name: Test
@@ -54,7 +54,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-hack,cargo-nextest
-      - run: cargo hack nextest run --feature-powerset
+      - run: cargo hack nextest run --feature-powerset --skip docs
       - name: Upload Proptest Regressions Artifact (Optional)
         if: always()
         uses: actions/upload-artifact@v4

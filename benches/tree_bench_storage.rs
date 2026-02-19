@@ -28,6 +28,8 @@ fn bench_insert_single(n_values: Vec<usize>) {
                             let config = RotorTreeConfig {
                                 path: dir.path().to_path_buf(),
                                 flush_policy: FlushPolicy::Manual,
+                                checkpoint_policy: Default::default(),
+                                tiering: Default::default(),
                             };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             (tree, dir)
@@ -61,7 +63,9 @@ fn bench_insert_many(n_values: Vec<usize>) {
                             let config = RotorTreeConfig {
                                 path: dir.path().to_path_buf(),
                                 flush_policy: FlushPolicy::Manual,
-                            };
+                                checkpoint_policy: Default::default(),
+                                tiering: Default::default(),
+                             };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             #[cfg(feature = "parallel")]
                             rayon::broadcast(|_| {});
@@ -90,6 +94,8 @@ fn special_insert_many(bencher: divan::Bencher, n: usize) {
             let config = RotorTreeConfig {
                 path: dir.path().to_path_buf(),
                 flush_policy: FlushPolicy::Manual,
+                checkpoint_policy: Default::default(),
+                tiering: Default::default(),
             };
             let tree =
                 RotorTree::<Blake3Hasher, 8, 11>::open(Blake3Hasher, config).unwrap();
@@ -118,7 +124,9 @@ fn bench_flush(n_values: Vec<usize>) {
                             let config = RotorTreeConfig {
                                 path: dir.path().to_path_buf(),
                                 flush_policy: FlushPolicy::Manual,
-                            };
+                                checkpoint_policy: Default::default(),
+                                tiering: Default::default(),
+                             };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             tree.insert_many(&leaves).unwrap();
                             (tree, dir)
@@ -150,7 +158,9 @@ fn bench_open_recover(n_values: Vec<usize>) {
                         let config = RotorTreeConfig {
                             path: path.clone(),
                             flush_policy: FlushPolicy::Manual,
-                        };
+                            checkpoint_policy: Default::default(),
+                            tiering: Default::default(),
+                     };
                         let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                         tree.insert_many(&leaves).unwrap();
                         tree.flush().unwrap();
@@ -163,6 +173,9 @@ fn bench_open_recover(n_values: Vec<usize>) {
                             let config = RotorTreeConfig {
                                 path,
                                 flush_policy: FlushPolicy::Manual,
+                                checkpoint_policy: Default::default(),
+                                tiering: Default::default(),
+
                             };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             divan::black_box(tree.root());
@@ -195,7 +208,9 @@ fn bench_mixed_workload(n_values: Vec<usize>) {
                             let config = RotorTreeConfig {
                                 path: dir.path().to_path_buf(),
                                 flush_policy: FlushPolicy::Manual,
-                            };
+                                checkpoint_policy: Default::default(),
+                                tiering: Default::default(),
+                             };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             tree.insert_many(&prepop_leaves).unwrap();
                             tree.flush().unwrap();

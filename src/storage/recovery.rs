@@ -4,6 +4,14 @@ use std::io::{
     SeekFrom,
     Write,
 };
+use std::sync::Arc;
+
+use crate::tree::{
+    CHUNK_SIZE,
+    Chunk,
+};
+
+use super::checkpoint;
 
 use crate::{
     Hash,
@@ -53,7 +61,6 @@ impl WalFile for std::fs::File {
 /// If the file is empty, writes a fresh header. If it contains
 /// entries, replays them into a new `TreeInner`. Truncates any
 /// incomplete tail entries.
-#[allow(clippy::cast_possible_truncation)]
 pub(crate) fn recover<H, F, const N: usize, const MAX_DEPTH: usize>(
     file: &mut F,
     hasher: &H,
@@ -65,6 +72,7 @@ where
     let file_len = file.file_len()?;
 
     if file_len == 0 {
+        #[allow(clippy::cast_possible_truncation)]
         let buf = serialize_header(N as u32, MAX_DEPTH as u32);
         file.write_all(&buf)?;
         file.sync()?;
@@ -74,12 +82,15 @@ where
         });
     }
 
-    let mut all_data = vec![0u8; file_len as usize];
+    let file_len_usize =
+        usize::try_from(file_len).map_err(|_| StorageError::MathError)?;
+    let mut all_data = vec![0u8; file_len_usize];
     file.seek(SeekFrom::Start(0))?;
     file.read_exact(&mut all_data)?;
 
     let (n, max_depth, header_size) = deserialize_header(&all_data)?;
 
+    #[allow(clippy::cast_possible_truncation)]
     if n != N as u32 || max_depth != MAX_DEPTH as u32 {
         return Err(StorageError::ConfigMismatch {
             expected_n: N as u32,
@@ -90,46 +101,12 @@ where
     }
 
     let entry_data = &all_data[header_size..];
-    let mut offset: usize = 0;
-    let mut last_seq: Option<u64> = None;
-    let mut pending_singles: Vec<Hash> = Vec::new();
     let mut inner = TreeInner::<N, MAX_DEPTH>::new();
-
-    loop {
-        match deserialize_entry(entry_data, offset, last_seq) {
-            Ok(Some((entry, consumed))) => {
-                match entry.payload {
-                    WalPayload::Single(leaf) => {
-                        pending_singles.push(leaf);
-                    }
-                    WalPayload::Batch(cow) => {
-                        flush_pending::<H, N, MAX_DEPTH>(
-                            &mut inner,
-                            hasher,
-                            &mut pending_singles,
-                        )?;
-                        crate::LeanIMT::<H, N, MAX_DEPTH>::_insert_many(
-                            &mut inner,
-                            hasher,
-                            cow.as_slice(),
-                        )
-                        .map_err(StorageError::Tree)?;
-                    }
-                }
-                last_seq = Some(entry.seq);
-                offset = offset
-                    .checked_add(consumed)
-                    .ok_or(StorageError::MathError)?;
-            }
-            Ok(None) => break,
-            Err(e) => return Err(e),
-        }
-    }
-
-    flush_pending::<H, N, MAX_DEPTH>(&mut inner, hasher, &mut pending_singles)?;
+    let (last_seq, valid_offset) =
+        replay_wal_entries::<H, N, MAX_DEPTH>(entry_data, hasher, &mut inner, None)?;
 
     let valid_end = (header_size as u64)
-        .checked_add(offset as u64)
+        .checked_add(valid_offset as u64)
         .ok_or(StorageError::MathError)?;
     if valid_end < file_len {
         file.truncate_at(valid_end)?;
@@ -142,6 +119,213 @@ where
         None => 0,
     };
     Ok(RecoveryResult { inner, next_seq })
+}
+
+/// Recover from checkpoint data files, falling back to full wal replay
+pub(crate) fn recover_with_checkpoint<H, F, const N: usize, const MAX_DEPTH: usize>(
+    wal_file: &mut F,
+    hasher: &H,
+    data_dir: &std::path::Path,
+) -> Result<RecoveryResult<N, MAX_DEPTH>, StorageError>
+where
+    H: Hasher,
+    F: WalFile,
+{
+
+    let meta = match checkpoint::read_meta(data_dir)? {
+        Some(m) => m,
+        None => return recover(wal_file, hasher),
+    };
+
+    #[allow(clippy::cast_possible_truncation)]
+    if meta.n != N as u32 || meta.max_depth != MAX_DEPTH as u32 {
+        return recover(wal_file, hasher);
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    match checkpoint::read_header(data_dir)? {
+        Some(h)
+            if h.n == N as u32
+                && h.max_depth == MAX_DEPTH as u32
+                && h.chunk_size == CHUNK_SIZE as u32 =>
+        {
+            // valid
+        }
+        _ => return recover(wal_file, hasher),
+    }
+
+    let leaf_count =
+        usize::try_from(meta.leaf_count).map_err(|_| StorageError::MathError)?;
+    let depth = meta.depth as usize;
+
+    let mut level_lens = [0usize; MAX_DEPTH];
+    if leaf_count > 0 {
+        level_lens[0] = leaf_count;
+        for k in 1..=depth.min(MAX_DEPTH - 1) {
+            level_lens[k] = level_lens[k - 1].div_ceil(N);
+        }
+    }
+
+    let tails = match checkpoint::read_tails(data_dir, MAX_DEPTH)? {
+        Some(t) => t,
+        None => return recover(wal_file, hasher),
+    };
+
+    let mut inner = TreeInner::<N, MAX_DEPTH>::new();
+
+    for level_idx in 0..=depth.min(MAX_DEPTH - 1) {
+        let len = level_lens[level_idx];
+        if len == 0 {
+            continue;
+        }
+
+        let num_chunks = len / CHUNK_SIZE;
+        let tail_len = len % CHUNK_SIZE;
+
+        let region = if num_chunks > 0 {
+            checkpoint::mmap_level_file(data_dir, level_idx, num_chunks)?
+        } else {
+            None
+        };
+
+        let mut chunks = Vec::with_capacity(num_chunks);
+        if let Some(ref region) = region {
+            for chunk_idx in 0..num_chunks {
+                let offset = chunk_idx * checkpoint::CHUNK_BYTE_SIZE;
+                chunks.push(Chunk::new_mapped(Arc::clone(region), offset));
+            }
+        }
+
+        inner.set_level_from_parts(level_idx, chunks, tails[level_idx], tail_len, len);
+    }
+
+    inner.root = if leaf_count > 0 {
+        Some(meta.root_hash)
+    } else {
+        None
+    };
+    inner.size = meta.leaf_count;
+    inner.depth = depth;
+
+    if leaf_count > 0 {
+        let computed = inner.recompute_root(hasher);
+        if computed != inner.root {
+            return Err(StorageError::DataCorruption {
+                detail: format!(
+                    "root mismatch: stored {:?}, recomputed {:?}",
+                    inner.root, computed
+                ),
+            });
+        }
+    }
+
+    let file_len = wal_file.file_len()?;
+
+    let next_seq = if file_len == 0 {
+        #[allow(clippy::cast_possible_truncation)]
+        let buf = serialize_header(N as u32, MAX_DEPTH as u32);
+        wal_file.write_all(&buf)?;
+        wal_file.sync()?;
+        meta.last_wal_seq
+            .checked_add(1)
+            .ok_or(StorageError::MathError)?
+    } else {
+        let file_len_usize =
+            usize::try_from(file_len).map_err(|_| StorageError::MathError)?;
+        let mut all_data = vec![0u8; file_len_usize];
+        wal_file.seek(SeekFrom::Start(0))?;
+        wal_file.read_exact(&mut all_data)?;
+
+        let (n, max_depth, header_size) = deserialize_header(&all_data)?;
+        #[allow(clippy::cast_possible_truncation)]
+        if n != N as u32 || max_depth != MAX_DEPTH as u32 {
+            return Err(StorageError::ConfigMismatch {
+                expected_n: N as u32,
+                actual_n: n,
+                expected_max_depth: MAX_DEPTH as u32,
+                actual_max_depth: max_depth,
+            });
+        }
+
+        let entry_data = &all_data[header_size..];
+        let (last_seq, valid_offset) = replay_wal_entries::<H, N, MAX_DEPTH>(
+            entry_data,
+            hasher,
+            &mut inner,
+            Some(meta.last_wal_seq),
+        )?;
+
+        let valid_end = (header_size as u64)
+            .checked_add(valid_offset as u64)
+            .ok_or(StorageError::MathError)?;
+        if valid_end < file_len {
+            wal_file.truncate_at(valid_end)?;
+            wal_file.sync()?;
+        }
+        wal_file.seek(SeekFrom::Start(valid_end))?;
+
+        match last_seq {
+            Some(s) => s.checked_add(1).ok_or(StorageError::MathError)?,
+            None => meta
+                .last_wal_seq
+                .checked_add(1)
+                .ok_or(StorageError::MathError)?,
+        }
+    };
+
+    Ok(RecoveryResult { inner, next_seq })
+}
+
+/// replay wal
+fn replay_wal_entries<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
+    entry_data: &[u8],
+    hasher: &H,
+    inner: &mut TreeInner<N, MAX_DEPTH>,
+    skip_until_seq: Option<u64>,
+) -> Result<(Option<u64>, usize), StorageError> {
+    let mut offset: usize = 0;
+    let mut last_seq: Option<u64> = None;
+    let mut pending_singles: Vec<Hash> = Vec::new();
+
+    loop {
+        match deserialize_entry(entry_data, offset, last_seq) {
+            Ok(Some((entry, consumed))) => {
+                let should_replay = match skip_until_seq {
+                    Some(skip) => entry.seq > skip,
+                    None => true,
+                };
+                if should_replay {
+                    match entry.payload {
+                        WalPayload::Single(leaf) => {
+                            pending_singles.push(leaf);
+                        }
+                        WalPayload::Batch(cow) => {
+                            flush_pending::<H, N, MAX_DEPTH>(
+                                inner,
+                                hasher,
+                                &mut pending_singles,
+                            )?;
+                            crate::LeanIMT::<H, N, MAX_DEPTH>::_insert_many(
+                                inner,
+                                hasher,
+                                cow.as_slice(),
+                            )
+                            .map_err(StorageError::Tree)?;
+                        }
+                    }
+                }
+                last_seq = Some(entry.seq);
+                offset = offset
+                    .checked_add(consumed)
+                    .ok_or(StorageError::MathError)?;
+            }
+            Ok(None) => break,
+            Err(e) => return Err(e),
+        }
+    }
+
+    flush_pending::<H, N, MAX_DEPTH>(inner, hasher, &mut pending_singles)?;
+    Ok((last_seq, offset))
 }
 
 /// Flush accumulated single-insert leaves as a batch

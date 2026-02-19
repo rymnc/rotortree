@@ -33,8 +33,12 @@ pub enum StorageError {
     Tree(TreeError),
     /// The background flush thread encountered an I/O error
     FlushFailed(Arc<std::io::Error>),
+    /// The background checkpoint thread encountered an error
+    CheckpointFailed(String),
     /// Math error
     MathError,
+    /// Data corruption detected (e.g., root recomputation mismatch)
+    DataCorruption { detail: String },
 }
 
 impl fmt::Display for StorageError {
@@ -72,8 +76,14 @@ impl fmt::Display for StorageError {
             Self::FlushFailed(e) => {
                 write!(f, "background flush failed: {e}")
             }
+            Self::CheckpointFailed(detail) => {
+                write!(f, "background checkpoint failed: {detail}")
+            }
             Self::MathError => {
                 write!(f, "math error")
+            }
+            Self::DataCorruption { detail } => {
+                write!(f, "data corruption: {detail}")
             }
         }
     }
