@@ -18,27 +18,52 @@ use crate::{
 /// Number of hashes per chunk for structural sharing.
 pub(crate) const CHUNK_SIZE: usize = 128;
 
-/// Chunk wrapper
+#[cfg(not(feature = "storage"))]
+#[derive(Clone)]
+pub(crate) struct Chunk(Arc<[Hash; CHUNK_SIZE]>);
+
+#[cfg(not(feature = "storage"))]
+impl Chunk {
+    #[inline(always)]
+    pub(crate) fn as_slice(&self) -> &[Hash; CHUNK_SIZE] {
+        &self.0
+    }
+
+    #[inline(always)]
+    fn make_mut(&mut self) -> &mut [Hash; CHUNK_SIZE] {
+        Arc::make_mut(&mut self.0)
+    }
+
+    fn new_memory(data: [Hash; CHUNK_SIZE]) -> Self {
+        Self(Arc::new(data))
+    }
+
+    #[cfg(test)]
+    fn ptr_eq(a: &Self, b: &Self) -> bool {
+        Arc::ptr_eq(&a.0, &b.0)
+    }
+}
+
+#[cfg(feature = "storage")]
 #[derive(Clone)]
 pub(crate) struct Chunk(ChunkInner);
 
+#[cfg(feature = "storage")]
 #[derive(Clone)]
 enum ChunkInner {
     Memory(Arc<[Hash; CHUNK_SIZE]>),
-    #[cfg(feature = "storage")]
     Mapped {
         region: Arc<crate::storage::data::MmapRegion>,
         offset: usize,
     },
 }
 
+#[cfg(feature = "storage")]
 impl Chunk {
-    /// Read the chunk's hashes
     #[inline(always)]
     pub(crate) fn as_slice(&self) -> &[Hash; CHUNK_SIZE] {
         match &self.0 {
             ChunkInner::Memory(arc) => arc,
-            #[cfg(feature = "storage")]
             ChunkInner::Mapped { region, offset } => {
                 // SAFETY: offset validated at construction
                 unsafe { &*(region.as_ptr().add(*offset).cast::<[Hash; CHUNK_SIZE]>()) }
@@ -46,28 +71,22 @@ impl Chunk {
         }
     }
 
-    /// Get mutable access
     #[inline(always)]
     fn make_mut(&mut self) -> &mut [Hash; CHUNK_SIZE] {
-        #[cfg(feature = "storage")]
         if matches!(&self.0, ChunkInner::Mapped { .. }) {
             let data = *self.as_slice();
             self.0 = ChunkInner::Memory(Arc::new(data));
         }
         match &mut self.0 {
             ChunkInner::Memory(arc) => Arc::make_mut(arc),
-            #[cfg(feature = "storage")]
             ChunkInner::Mapped { .. } => unreachable!(),
         }
     }
 
-    /// Create a new in-memory chunk
     fn new_memory(data: [Hash; CHUNK_SIZE]) -> Self {
         Self(ChunkInner::Memory(Arc::new(data)))
     }
 
-    /// Create an mmap-ed chunk
-    #[cfg(feature = "storage")]
     pub(crate) fn new_mapped(
         region: Arc<crate::storage::data::MmapRegion>,
         offset: usize,
@@ -81,12 +100,10 @@ impl Chunk {
         Self(ChunkInner::Mapped { region, offset })
     }
 
-    /// only used in tests
     #[cfg(test)]
     fn ptr_eq(a: &Self, b: &Self) -> bool {
         match (&a.0, &b.0) {
             (ChunkInner::Memory(a), ChunkInner::Memory(b)) => Arc::ptr_eq(a, b),
-            #[cfg(feature = "storage")]
             _ => false,
         }
     }
@@ -775,7 +792,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
             #[cfg(feature = "parallel")]
             {
                 let work = num_parents - start_parent;
-                if work >= Self::_parallel_threshold() && level == 0 {
+                if work >= Self::_parallel_threshold() {
                     use rayon::prelude::*;
 
                     let split_at = level + 1;

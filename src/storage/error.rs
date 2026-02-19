@@ -5,6 +5,12 @@ use std::{
 
 use crate::TreeError;
 
+#[derive(Clone, Debug)]
+pub(crate) enum BackgroundError {
+    FlushFailed(Arc<std::io::Error>),
+    CheckpointFailed(String),
+}
+
 /// Errors from WAL and storage operations
 #[derive(Debug)]
 pub enum StorageError {

@@ -125,7 +125,6 @@ tree.close().unwrap();
 
 `FlushPolicy` options:
 - `Interval(Duration)`: background thread fsyncs periodically
-- `BatchSize(n)`: fsync after every `n` buffered entries
 - `Manual`: caller controls flushing via `tree.flush()` (works well if you're following a blockchain as the canonical source of state transitions)
 
 `CheckpointPolicy` options (materializes wal state to data files, allowing wal truncation):

@@ -17,7 +17,6 @@ use std::{
         Arc,
         atomic::{
             AtomicBool,
-            AtomicU64,
             AtomicUsize,
             Ordering,
         },
@@ -69,8 +68,6 @@ pub struct RotorTreeConfig {
 pub enum FlushPolicy {
     /// Fsync on a periodic interval (default: 10ms)
     Interval(Duration),
-    /// Fsync after every N buffered entries
-    BatchSize(usize),
     /// Caller controls flushing via `flush()`
     Manual,
 }
@@ -79,12 +76,6 @@ impl Default for FlushPolicy {
     fn default() -> Self {
         Self::Interval(Duration::from_millis(10))
     }
-}
-
-/// Tracks per-level checkpoint state
-struct LevelFileState {
-    /// Number of chunks already written
-    checkpointed_chunks: usize,
 }
 
 /// level ordered checkpoint during snapshot
@@ -112,6 +103,12 @@ struct DurableState<const N: usize, const MAX_DEPTH: usize> {
     inner: TreeInner<N, MAX_DEPTH>,
     buffer: Vec<u8>,
     next_seq: u64,
+    checkpointed_chunks: Vec<usize>,
+}
+
+struct CheckpointCoord {
+    requested: bool,
+    completed: u64,
 }
 
 /// Shared state
@@ -122,21 +119,13 @@ struct Shared<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
     snapshot: ArcSwap<TreeSnapshot<N, MAX_DEPTH>>,
     durability: DurabilityTracker,
     closed: AtomicBool,
-    flush_failed: AtomicBool,
-    flush_error: Mutex<Option<Arc<std::io::Error>>>,
-    checkpoint_failed: AtomicBool,
-    checkpoint_error: Mutex<Option<String>>,
-    entry_count: AtomicUsize,
+    bg_error: ArcSwap<Option<error::BackgroundError>>,
     data_dir: PathBuf,
     checkpoint_policy: CheckpointPolicy,
     tiering: TieringConfig,
-    level_files: Mutex<Vec<LevelFileState>>,
     entries_since_checkpoint: AtomicUsize,
     uncheckpointed_memory_bytes: AtomicUsize,
-    checkpoint_requested: AtomicBool,
-    checkpoint_wake: (Mutex<()>, parking_lot::Condvar),
-    checkpoints_completed: AtomicU64,
-    checkpoint_complete_notify: (Mutex<()>, parking_lot::Condvar),
+    checkpoint: (Mutex<CheckpointCoord>, parking_lot::Condvar),
 }
 
 impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> {
@@ -149,7 +138,6 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
             }
             let buf = std::mem::take(&mut state.buffer);
             let last_seq = state.next_seq.saturating_sub(1);
-            self.entry_count.store(0, Ordering::Relaxed);
             (buf, last_seq)
         };
 
@@ -178,8 +166,9 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
                     state.buffer = combined;
                 }
                 let err = Arc::new(e);
-                *self.flush_error.lock() = Some(Arc::clone(&err));
-                self.flush_failed.store(true, Ordering::Relaxed);
+                self.bg_error.store(Arc::new(Some(
+                    error::BackgroundError::FlushFailed(Arc::clone(&err)),
+                )));
                 Err(StorageError::FlushFailed(err))
             }
         }
@@ -189,19 +178,15 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
         if self.closed.load(Ordering::Acquire) {
             return Err(StorageError::Closed);
         }
-        if self.flush_failed.load(Ordering::Relaxed) {
-            let err = self.flush_error.lock().clone().unwrap_or_else(|| {
-                Arc::new(std::io::Error::other("unknown flush error"))
+        if let Some(ref err) = **self.bg_error.load() {
+            return Err(match err {
+                error::BackgroundError::FlushFailed(e) => {
+                    StorageError::FlushFailed(Arc::clone(e))
+                }
+                error::BackgroundError::CheckpointFailed(s) => {
+                    StorageError::CheckpointFailed(s.clone())
+                }
             });
-            return Err(StorageError::FlushFailed(err));
-        }
-        if self.checkpoint_failed.load(Ordering::Relaxed) {
-            let detail = self
-                .checkpoint_error
-                .lock()
-                .clone()
-                .unwrap_or_else(|| "unknown checkpoint error".to_string());
-            return Err(StorageError::CheckpointFailed(detail));
         }
         Ok(())
     }
@@ -209,21 +194,16 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
     fn checkpoint_inner(&self) -> Result<(), StorageError> {
         let mut wal_file = self.wal_file.lock();
 
-        {
+        let snap = {
             let mut state = self.state.lock();
+
             if !state.buffer.is_empty() {
                 (&*wal_file).write_all(&state.buffer)?;
                 wal_file.sync_data()?;
                 self.durability
                     .mark_flushed(state.next_seq.saturating_sub(1));
                 state.buffer.clear();
-                self.entry_count.store(0, Ordering::Relaxed);
             }
-        }
-
-        let snap = {
-            let state = self.state.lock();
-            let level_files = self.level_files.lock();
 
             let depth = state.inner.depth;
             let leaf_count = state.inner.size;
@@ -238,8 +218,8 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
 
             for level_idx in 0..active_levels {
                 let total_chunks = state.inner.levels[level_idx].chunks().len();
-                let already = if level_idx < level_files.len() {
-                    level_files[level_idx].checkpointed_chunks
+                let already = if level_idx < state.checkpointed_chunks.len() {
+                    state.checkpointed_chunks[level_idx]
                 } else {
                     0
                 };
@@ -314,12 +294,9 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
 
         {
             let mut state = self.state.lock();
-            let mut level_files = self.level_files.lock();
 
-            while level_files.len() < snap.active_levels {
-                level_files.push(LevelFileState {
-                    checkpointed_chunks: 0,
-                });
+            while state.checkpointed_chunks.len() < snap.active_levels {
+                state.checkpointed_chunks.push(0);
             }
 
             for (level_idx, ld) in snap.level_data.iter().enumerate() {
@@ -343,7 +320,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
                     }
                 }
 
-                level_files[level_idx].checkpointed_chunks = snapshot_total;
+                state.checkpointed_chunks[level_idx] = snapshot_total;
             }
 
             // truncate wal
@@ -366,15 +343,18 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
                 self.durability
                     .mark_flushed(state.next_seq.saturating_sub(1));
                 state.buffer.clear();
-                self.entry_count.store(0, Ordering::Relaxed);
             }
 
             let new_snap = state.inner.snapshot();
             self.snapshot.store(Arc::new(new_snap));
         }
 
-        self.checkpoints_completed.fetch_add(1, Ordering::Release);
-        self.checkpoint_complete_notify.1.notify_all();
+        {
+            let (lock, cvar) = &self.checkpoint;
+            let mut coord = lock.lock();
+            coord.completed += 1;
+            cvar.notify_all();
+        }
 
         Ok(())
     }
@@ -394,9 +374,10 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
 
     /// offload checkpoint request
     fn request_checkpoint(&self) {
-        self.checkpoint_requested.store(true, Ordering::Release);
-        let (_lock, cvar) = &self.checkpoint_wake;
-        cvar.notify_one();
+        let (lock, cvar) = &self.checkpoint;
+        let mut coord = lock.lock();
+        coord.requested = true;
+        cvar.notify_all();
     }
 }
 
@@ -470,7 +451,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
         };
 
         // Compute initial level file state from checkpoint metadata
-        let level_files = compute_initial_level_files::<N, MAX_DEPTH>(&data_dir)?;
+        let checkpointed_chunks = compute_initial_level_files::<N, MAX_DEPTH>(&data_dir)?;
 
         let snap = inner.snapshot();
         let durability = DurabilityTracker::new();
@@ -483,6 +464,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
             inner,
             buffer: Vec::new(),
             next_seq,
+            checkpointed_chunks,
         };
 
         let shared = Arc::new(Shared {
@@ -492,21 +474,19 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
             snapshot: ArcSwap::from_pointee(snap),
             durability,
             closed: AtomicBool::new(false),
-            flush_failed: AtomicBool::new(false),
-            flush_error: Mutex::new(None),
-            checkpoint_failed: AtomicBool::new(false),
-            checkpoint_error: Mutex::new(None),
-            entry_count: AtomicUsize::new(0),
+            bg_error: ArcSwap::from_pointee(None),
             data_dir,
             checkpoint_policy: config.checkpoint_policy,
             tiering: config.tiering,
-            level_files: Mutex::new(level_files),
             entries_since_checkpoint: AtomicUsize::new(0),
             uncheckpointed_memory_bytes: AtomicUsize::new(0),
-            checkpoint_requested: AtomicBool::new(false),
-            checkpoint_wake: (Mutex::new(()), parking_lot::Condvar::new()),
-            checkpoints_completed: AtomicU64::new(0),
-            checkpoint_complete_notify: (Mutex::new(()), parking_lot::Condvar::new()),
+            checkpoint: (
+                Mutex::new(CheckpointCoord {
+                    requested: false,
+                    completed: 0,
+                }),
+                parking_lot::Condvar::new(),
+            ),
         });
 
         let flush_handle = start_flush_thread(&shared, &config.flush_policy)?;
@@ -533,7 +513,6 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
             let seq = state.next_seq;
             wal::serialize_entry(&mut state.buffer, seq, wal::WalPayload::Single(leaf));
             state.next_seq = state.next_seq.checked_add(1).expect("seq overflow; qed");
-            self.shared.entry_count.fetch_add(1, Ordering::Relaxed);
             self.shared
                 .entries_since_checkpoint
                 .fetch_add(1, Ordering::Relaxed);
@@ -571,7 +550,6 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
                 wal::WalPayload::Batch(wal::NewCow::Borrowed(leaves)),
             );
             state.next_seq = state.next_seq.checked_add(1).expect("seq overflow; qed");
-            self.shared.entry_count.fetch_add(1, Ordering::Relaxed);
             self.shared
                 .entries_since_checkpoint
                 .fetch_add(1, Ordering::Relaxed);
@@ -630,19 +608,19 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
 
     /// Block until a background checkpoint completes (or timeout)
     pub fn wait_for_checkpoint(&self, timeout: Duration) -> bool {
-        let initial = self.shared.checkpoints_completed.load(Ordering::Acquire);
+        let (lock, cvar) = &self.shared.checkpoint;
+        let mut coord = lock.lock();
+        let initial = coord.completed;
         let deadline = std::time::Instant::now() + timeout;
-        let (lock, cvar) = &self.shared.checkpoint_complete_notify;
-        let mut guard = lock.lock();
         loop {
-            if self.shared.checkpoints_completed.load(Ordering::Acquire) > initial {
+            if coord.completed > initial {
                 return true;
             }
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() {
                 return false;
             }
-            cvar.wait_for(&mut guard, remaining);
+            cvar.wait_for(&mut coord, remaining);
         }
     }
 
@@ -697,7 +675,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
 
 fn compute_initial_level_files<const N: usize, const MAX_DEPTH: usize>(
     data_dir: &std::path::Path,
-) -> Result<Vec<LevelFileState>, StorageError> {
+) -> Result<Vec<usize>, StorageError> {
     let meta = match checkpoint::read_meta(data_dir) {
         Ok(Some(m)) => m,
         Ok(None) => return Ok(Vec::new()),
@@ -718,9 +696,7 @@ fn compute_initial_level_files<const N: usize, const MAX_DEPTH: usize>(
 
     for _ in 0..active_levels {
         let chunks = level_len / CHUNK_SIZE;
-        result.push(LevelFileState {
-            checkpointed_chunks: chunks,
-        });
+        result.push(chunks);
         level_len = level_len.div_ceil(N);
     }
 
@@ -749,25 +725,6 @@ fn start_flush_thread<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
                 }
             })
         }
-        FlushPolicy::BatchSize(threshold) => {
-            let threshold = *threshold;
-            let shared = Arc::clone(shared);
-            spawn_flush_thread(move |shutdown| {
-                let (lock, cvar) = &*shutdown;
-                let check_interval = Duration::from_millis(1);
-                loop {
-                    let mut stop = lock.lock();
-                    cvar.wait_for(&mut stop, check_interval);
-                    if *stop {
-                        break;
-                    }
-                    drop(stop);
-                    if shared.entry_count.load(Ordering::Relaxed) >= threshold {
-                        let _ = shared.flush_inner();
-                    }
-                }
-            })
-        }
     }
 }
 
@@ -785,25 +742,23 @@ fn start_checkpoint_thread<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
     let handle = std::thread::Builder::new()
         .name("rotortree-checkpoint".to_string())
         .spawn(move || {
-            let (lock, cvar) = &shared.checkpoint_wake;
+            let (lock, cvar) = &shared.checkpoint;
             loop {
-                // Wait for a checkpoint request or shutdown.
                 {
-                    let mut guard = lock.lock();
-                    while !shared.checkpoint_requested.load(Ordering::Acquire)
-                        && !shared.closed.load(Ordering::Acquire)
-                    {
-                        cvar.wait(&mut guard);
+                    let mut coord = lock.lock();
+                    while !coord.requested && !shared.closed.load(Ordering::Acquire) {
+                        cvar.wait(&mut coord);
                     }
+                    if shared.closed.load(Ordering::Acquire) {
+                        break;
+                    }
+                    coord.requested = false;
                 }
-                if shared.closed.load(Ordering::Acquire) {
-                    break;
-                }
-                shared.checkpoint_requested.store(false, Ordering::Relaxed);
 
                 if let Err(e) = shared.checkpoint_inner() {
-                    *shared.checkpoint_error.lock() = Some(e.to_string());
-                    shared.checkpoint_failed.store(true, Ordering::Relaxed);
+                    shared.bg_error.store(Arc::new(Some(
+                        error::BackgroundError::CheckpointFailed(e.to_string()),
+                    )));
                     break;
                 }
             }
