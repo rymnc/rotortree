@@ -166,9 +166,10 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
                     state.buffer = combined;
                 }
                 let err = Arc::new(e);
-                self.bg_error.store(Arc::new(Some(
-                    error::BackgroundError::FlushFailed(Arc::clone(&err)),
-                )));
+                self.bg_error
+                    .store(Arc::new(Some(error::BackgroundError::FlushFailed(
+                        Arc::clone(&err),
+                    ))));
                 Err(StorageError::FlushFailed(err))
             }
         }
