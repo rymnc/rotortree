@@ -17,6 +17,7 @@ use std::{
         Arc,
         atomic::{
             AtomicBool,
+            AtomicU64,
             AtomicUsize,
             Ordering,
         },
@@ -134,6 +135,8 @@ struct Shared<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
     uncheckpointed_memory_bytes: AtomicUsize,
     checkpoint_requested: AtomicBool,
     checkpoint_wake: (Mutex<()>, parking_lot::Condvar),
+    checkpoints_completed: AtomicU64,
+    checkpoint_complete_notify: (Mutex<()>, parking_lot::Condvar),
 }
 
 impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> {
@@ -204,8 +207,19 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
     }
 
     fn checkpoint_inner(&self) -> Result<(), StorageError> {
-        // flush buffered wal entries
-        self.flush_inner()?;
+        let mut wal_file = self.wal_file.lock();
+
+        {
+            let mut state = self.state.lock();
+            if !state.buffer.is_empty() {
+                (&*wal_file).write_all(&state.buffer)?;
+                wal_file.sync_data()?;
+                self.durability
+                    .mark_flushed(state.next_seq.saturating_sub(1));
+                state.buffer.clear();
+                self.entry_count.store(0, Ordering::Relaxed);
+            }
+        }
 
         let snap = {
             let state = self.state.lock();
@@ -299,7 +313,6 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
         )?;
 
         {
-            let mut wal_file = self.wal_file.lock();
             let mut state = self.state.lock();
             let mut level_files = self.level_files.lock();
 
@@ -347,9 +360,21 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
             self.entries_since_checkpoint.store(0, Ordering::Relaxed);
             self.uncheckpointed_memory_bytes.store(0, Ordering::Relaxed);
 
+            if !state.buffer.is_empty() {
+                (&*wal_file).write_all(&state.buffer)?;
+                wal_file.sync_data()?;
+                self.durability
+                    .mark_flushed(state.next_seq.saturating_sub(1));
+                state.buffer.clear();
+                self.entry_count.store(0, Ordering::Relaxed);
+            }
+
             let new_snap = state.inner.snapshot();
             self.snapshot.store(Arc::new(new_snap));
         }
+
+        self.checkpoints_completed.fetch_add(1, Ordering::Release);
+        self.checkpoint_complete_notify.1.notify_all();
 
         Ok(())
     }
@@ -480,6 +505,8 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
             uncheckpointed_memory_bytes: AtomicUsize::new(0),
             checkpoint_requested: AtomicBool::new(false),
             checkpoint_wake: (Mutex::new(()), parking_lot::Condvar::new()),
+            checkpoints_completed: AtomicU64::new(0),
+            checkpoint_complete_notify: (Mutex::new(()), parking_lot::Condvar::new()),
         });
 
         let flush_handle = start_flush_thread(&shared, &config.flush_policy)?;
@@ -599,6 +626,24 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
     pub fn checkpoint(&self) -> Result<(), StorageError> {
         self.shared.check_closed()?;
         self.shared.checkpoint_inner()
+    }
+
+    /// Block until a background checkpoint completes (or timeout)
+    pub fn wait_for_checkpoint(&self, timeout: Duration) -> bool {
+        let initial = self.shared.checkpoints_completed.load(Ordering::Acquire);
+        let deadline = std::time::Instant::now() + timeout;
+        let (lock, cvar) = &self.shared.checkpoint_complete_notify;
+        let mut guard = lock.lock();
+        loop {
+            if self.shared.checkpoints_completed.load(Ordering::Acquire) > initial {
+                return true;
+            }
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            cvar.wait_for(&mut guard, remaining);
+        }
     }
 
     /// Close the tree

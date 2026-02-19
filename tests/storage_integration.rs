@@ -37,17 +37,6 @@ fn leaf(n: u32) -> Hash {
     h
 }
 
-fn wait_for_background_checkpoint(dir: &std::path::Path) {
-    let data_dir = dir.join("data");
-    for _ in 0..100 {
-        if data_dir.exists() {
-            return;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    panic!("background checkpoint did not complete within 1s");
-}
-
 fn manual_config(dir: &std::path::Path) -> RotorTreeConfig {
     RotorTreeConfig {
         path: dir.to_path_buf(),
@@ -654,7 +643,7 @@ fn checkpoint_every_n_entries() {
         tree.insert(leaf(i)).unwrap();
     }
 
-    wait_for_background_checkpoint(dir.path());
+    assert!(tree.wait_for_checkpoint(std::time::Duration::from_secs(5)));
 
     let root = tree.root();
     tree.flush().unwrap();
@@ -684,7 +673,7 @@ fn checkpoint_memory_threshold() {
     let leaves: Vec<Hash> = (0..200u32).map(leaf).collect();
     tree.insert_many(&leaves).unwrap();
 
-    wait_for_background_checkpoint(dir.path());
+    assert!(tree.wait_for_checkpoint(std::time::Duration::from_secs(5)));
 
     let root = tree.root();
     tree.flush().unwrap();
