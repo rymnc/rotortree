@@ -1,5 +1,6 @@
 use rotortree::{
     Blake3Hasher,
+    CheckpointPolicy,
     FlushPolicy,
     RotorTree,
     RotorTreeConfig,
@@ -237,3 +238,41 @@ fn bench_mixed_workload(n_values: Vec<usize>) {
 }
 
 bench_mixed_workload!([2, 4, 8, 16]);
+
+#[crabtime::function]
+fn bench_sustained_checkpoint(n_values: Vec<usize>) {
+    let counts = [100_000, 1_000_000];
+    let ckpt_freqs = [5usize, 25, 100, 500];
+    for n in n_values {
+        for count in counts {
+            for freq in ckpt_freqs {
+                crabtime::output! {
+                    #[divan::bench]
+                    fn sustained_checkpoint_n{{n}}_{{count}}_every{{freq}}(bencher: divan::Bencher) {
+                        let leaves = generate_leaves({{count}});
+                        bencher
+                            .counter(divan::counter::ItemsCount::new({{count}} as usize))
+                            .with_inputs(|| {
+                                let dir = tempfile::tempdir().unwrap();
+                                let config = RotorTreeConfig {
+                                    path: dir.path().to_path_buf(),
+                                    flush_policy: FlushPolicy::Manual,
+                                    checkpoint_policy: CheckpointPolicy::EveryNEntries({{freq}} as u64),
+                                    tiering: Default::default(),
+                                };
+                                let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
+                                (tree, dir)
+                            })
+                            .bench_local_refs(|(tree, _dir)| {
+                                for chunk in leaves.chunks(10_000) {
+                                    divan::black_box(tree.insert_many(chunk).unwrap());
+                                }
+                            });
+                    }
+                }
+            }
+        }
+    }
+}
+
+bench_sustained_checkpoint!([2, 4, 8, 16]);

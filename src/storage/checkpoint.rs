@@ -209,7 +209,8 @@ pub(crate) fn write_tails(
         let base = i * CHUNK_BYTE_SIZE;
         let tail_bytes = tail.len() * 32;
         // SAFETY: tail is &[Hash] where Hash is [u8; 32], so this is a flat byte view
-        let src = unsafe { std::slice::from_raw_parts(tail.as_ptr() as *const u8, tail_bytes) };
+        let src =
+            unsafe { std::slice::from_raw_parts(tail.as_ptr() as *const u8, tail_bytes) };
         buf[base..base + tail_bytes].copy_from_slice(src);
     }
 
@@ -237,7 +238,8 @@ pub(crate) fn read_tails(
         let base = i * CHUNK_BYTE_SIZE;
         let chunk = &data[base..base + CHUNK_BYTE_SIZE];
         // SAFETY: CHUNK_BYTE_SIZE == CHUNK_SIZE * 32, so chunk is exactly [[u8; 32]; CHUNK_SIZE]
-        let tail: [[u8; 32]; CHUNK_SIZE] = unsafe { chunk.as_ptr().cast::<[[u8; 32]; CHUNK_SIZE]>().read() };
+        let tail: [[u8; 32]; CHUNK_SIZE] =
+            unsafe { chunk.as_ptr().cast::<[[u8; 32]; CHUNK_SIZE]>().read() };
         tails.push(tail);
     }
 
@@ -304,7 +306,7 @@ pub(crate) fn mmap_level_file(
 pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> io::Result<()> {
     let mut s = path.as_os_str().to_owned();
     s.push(".tmp");
-    let tmp_path = PathBuf::from(s);
+    let tmp = PathBuf::from(s);
     {
         let mut file = fs::File::create(&tmp)?;
         file.write_all(data)?;

@@ -1,10 +1,12 @@
-use std::io::{
-    Read,
-    Seek,
-    SeekFrom,
-    Write,
+use std::{
+    io::{
+        Read,
+        Seek,
+        SeekFrom,
+        Write,
+    },
+    sync::Arc,
 };
-use std::sync::Arc;
 
 use crate::tree::{
     CHUNK_SIZE,
@@ -131,7 +133,6 @@ where
     H: Hasher,
     F: WalFile,
 {
-
     let meta = match checkpoint::read_meta(data_dir)? {
         Some(m) => m,
         None => return recover(wal_file, hasher),
