@@ -59,6 +59,10 @@ name = "tree_bench_storage"
 harness = false
 required-features = ["storage"]
 
+[[example]]
+name = "bulk_load"
+required-features = ["storage", "parallel", "blake3"]
+
 [profile.profiling]
 inherits = "release"
 debug = true
