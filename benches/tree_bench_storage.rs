@@ -250,6 +250,7 @@ fn bench_sustained_checkpoint(n_values: Vec<usize>) {
                     #[divan::bench]
                     fn sustained_checkpoint_n{{n}}_{{count}}_every{{freq}}(bencher: divan::Bencher) {
                         let leaves = generate_leaves({{count}});
+                        let hasher = Blake3Hasher;
                         bencher
                             .counter(divan::counter::ItemsCount::new({{count}} as usize))
                             .with_inputs(|| {
@@ -266,6 +267,18 @@ fn bench_sustained_checkpoint(n_values: Vec<usize>) {
                             .bench_local_refs(|(tree, _dir)| {
                                 for chunk in leaves.chunks(10_000) {
                                     divan::black_box(tree.insert_many(chunk).unwrap());
+
+                                    let snap = tree.snapshot();
+                                    let size = snap.size();
+                                    // proof at oldest leaf
+                                    let proof = snap.generate_proof(0).unwrap();
+                                    divan::black_box(proof.verify(&hasher).unwrap());
+                                    // proof at midpoint
+                                    let proof = snap.generate_proof(size / 2).unwrap();
+                                    divan::black_box(proof.verify(&hasher).unwrap());
+                                    // proof at newest leaf
+                                    let proof = snap.generate_proof(size - 1).unwrap();
+                                    divan::black_box(proof.verify(&hasher).unwrap());
                                 }
                             });
                     }

@@ -29,16 +29,16 @@ the tree design itself is heavily inspired by [lean-imt](https://zkkit.org/leani
 - you should constrain node values to the finite field you're using before insertion
 - generic hasher, blake3 default
 - batteries included for playing with different branching factors and max depths
-- wal for persistence and recovery. see [#future-work](#future-work) for checkpoint mechanism details
+- wal for persistence and recovery, with checkpointing to prevent unbounded wal growth
 - [wincode](https://github.com/anza-xyz/wincode) for fast serde
 - no_std by default, persistence requires std
 - benchmarks driven and configured by divan + crabtime
-- your tree _should_ fit in memory :)
+- by default your tree lives in memory, but with the `storage` feature you can tier cold levels to mmap'd data files via `TieringConfig::pin_above_level`
   - with N=4, MAX_DEPTH=16, you can fit ~4.3B nullifiers in 41 GiB
   - with N=8, MAX_DEPTH=10, you can fit ~1B nullifiers in 37 GiB
   - which are quite feasible, but expensive. just use a new tree per generation and encode your nullifiers with the generation pls
   - in most cases, you just need the tree in memory without crash persistence (as long as there is a bootstrapping sync mechanism), just use the single threaded variant, its _MUCH_ better if you have a low number of insertions
-  - for this reason, one cannot do an apples to apples comparison of this impl with other merkle tree dbs which write and read from the disk. here the writes are to the wal + memory and reads are only from memory
+  - writes go to the wal + memory, reads are always from memory or mmap. one cannot do an apples to apples comparison with other merkle tree dbs that read from disk on every query
 - few dependencies ~ 65 (active + transitive, excluding dev deps)
 
 <!-- ANCHOR_END: design --> 
@@ -86,13 +86,16 @@ optional feature flags for the in-memory mode:
 
 ```rust
 use rotortree::{
-    Blake3Hasher, RotorTree, RotorTreeConfig, FlushPolicy,
+    Blake3Hasher, RotorTree, RotorTreeConfig,
+    FlushPolicy, CheckpointPolicy, TieringConfig,
 };
 use std::path::PathBuf;
 
 let config = RotorTreeConfig {
     path: PathBuf::from("/tmp/my-tree"),
     flush_policy: FlushPolicy::default(), // fsync every 10ms
+    checkpoint_policy: CheckpointPolicy::default(), // manual
+    tiering: TieringConfig::default(), // all in memory
 };
 
 // opens existing WAL or creates a new one
@@ -124,6 +127,15 @@ tree.close().unwrap();
 - `Interval(Duration)`: background thread fsyncs periodically
 - `BatchSize(n)`: fsync after every `n` buffered entries
 - `Manual`: caller controls flushing via `tree.flush()` (works well if you're following a blockchain as the canonical source of state transitions)
+
+`CheckpointPolicy` options (materializes wal state to data files, allowing wal truncation):
+- `Manual`: caller calls `checkpoint()` explicitly
+- `EveryNEntries(n)`: auto-checkpoint after every `n` wal entries
+- `MemoryThreshold(bytes)`: auto-checkpoint when uncheckpointed memory exceeds threshold
+- `OnClose`: checkpoint only on graceful close
+
+`TieringConfig` controls which levels stay in memory vs get mmap'd after checkpoint:
+- `pin_above_level`: levels below this value have their committed chunks mmap'd from data files after checkpoint. set to `0` to keep everything in memory (default: `usize::MAX`, all checkpointed chunks get mmap'd)
 
 <!-- ANCHOR_END: usage --> 
 
@@ -210,5 +222,4 @@ there seems to be some performance variance with the storage feature enabled, as
 
 ## Future work
 
-1. optimize `ceil_log_n` by precomputing the table; 
-2. currently working on the design for the checkpointing mechanism to prevent unbounded growth of the wal
+1. optimize `ceil_log_n` by precomputing the table
