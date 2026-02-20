@@ -3,3 +3,4 @@ Cargo.lock
 profile.json.gz
 .db
 *.csv
+bench_results/

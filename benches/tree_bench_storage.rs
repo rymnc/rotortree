@@ -85,33 +85,6 @@ fn bench_insert_many(n_values: Vec<usize>) {
 
 bench_insert_many!([2, 4, 8, 16]);
 
-// a special configuration that offers a nice balance between depth and total leaves
-// 8^11 = 8,589,934,592 leaves
-#[divan::bench(args = [1_000usize, 10_000, 100_000, 1_000_000])]
-fn special_insert_many(bencher: divan::Bencher, n: usize) {
-    let leaves = generate_leaves(n);
-    bencher
-        .counter(divan::counter::ItemsCount::new(n))
-        .with_inputs(|| {
-            let dir = tempfile::tempdir().unwrap();
-            let config = RotorTreeConfig {
-                path: dir.path().to_path_buf(),
-                flush_policy: FlushPolicy::Manual,
-                checkpoint_policy: Default::default(),
-                tiering: Default::default(),
-                verify_checkpoint: true,
-            };
-            let tree =
-                RotorTree::<Blake3Hasher, 8, 11>::open(Blake3Hasher, config).unwrap();
-            #[cfg(feature = "parallel")]
-            rayon::broadcast(|_| {});
-            (tree, dir)
-        })
-        .bench_local_refs(|(tree, _dir)| {
-            divan::black_box(tree.insert_many(&leaves).unwrap());
-        });
-}
-
 #[crabtime::function]
 fn bench_flush(n_values: Vec<usize>) {
     let counts = [1_000usize, 10_000, 100_000];
