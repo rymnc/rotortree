@@ -137,6 +137,19 @@ tree.close().unwrap();
 `TieringConfig` controls which levels stay in memory vs get mmap'd after checkpoint:
 - `pin_above_level`: levels below this value have their committed chunks mmap'd from data files after checkpoint. set to `0` to keep everything in memory (default: `usize::MAX`, all checkpointed chunks get mmap'd)
 
+### Tuning
+
+of course, you'll have to benchmark your unique workload to see if this database suits your use case and requirements. here are some constants and env vars you can play around with to alter behaviour:
+
+compile-time constants (change in source and recompile):
+- `CHUNK_SIZE` (default `128`): hashes per chunk for structural sharing. 128 × 32 bytes = 4 KB per chunk. affects snapshot copy cost and arc granularity
+- `CHUNKS_PER_SEGMENT` (default `256`): chunks per immutable segment. controls how many chunks are frozen into a single arc slab 
+- `PAR_CHUNK_SIZE` (default `64`, `parallel` feature): parents per rayon work unit. smaller values = more parallelism but more scheduling overhead
+- `MAX_FRAME_PAYLOAD` (default `128 MB`): maximum wal/checkpoint frame payload size. change this if you insert_many more than 128 MB worth of leaves
+
+runtime env vars:
+- `ROTORTREE_PARALLEL_THRESHOLD` (default `1024`, `parallel` feature): minimum parent count before rayon parallelism kicks in
+
 <!-- ANCHOR_END: usage --> 
 
 ## Development
