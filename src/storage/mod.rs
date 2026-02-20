@@ -62,6 +62,8 @@ pub struct RotorTreeConfig {
     pub checkpoint_policy: CheckpointPolicy,
     /// Controls which tree levels are kept in memory vs mmap'd
     pub tiering: TieringConfig,
+    /// Recompute Merkle root on recovery to detect corruption beyond CRC
+    pub verify_checkpoint: bool,
 }
 
 /// Controls when buffered WAL entries are fsynced to disk
@@ -445,7 +447,10 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
         let has_data_dir = data_dir.exists();
         let RecoveryResult { inner, next_seq } = if has_data_dir {
             recovery::recover_with_checkpoint::<H, _, N, MAX_DEPTH>(
-                &mut file, &hasher, &data_dir,
+                &mut file,
+                &hasher,
+                &data_dir,
+                config.verify_checkpoint,
             )?
         } else {
             recovery::recover::<H, _, N, MAX_DEPTH>(&mut file, &hasher)?

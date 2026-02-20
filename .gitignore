@@ -2,3 +2,4 @@
 Cargo.lock
 profile.json.gz
 .db
+*.csv

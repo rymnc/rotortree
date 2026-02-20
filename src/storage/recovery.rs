@@ -128,6 +128,7 @@ pub(crate) fn recover_with_checkpoint<H, F, const N: usize, const MAX_DEPTH: usi
     wal_file: &mut F,
     hasher: &H,
     data_dir: &std::path::Path,
+    verify: bool,
 ) -> Result<RecoveryResult<N, MAX_DEPTH>, StorageError>
 where
     H: Hasher,
@@ -208,7 +209,7 @@ where
     inner.size = meta.leaf_count;
     inner.depth = depth;
 
-    if leaf_count > 0 {
+    if verify && leaf_count > 0 {
         let computed = inner.recompute_root(hasher);
         if computed != inner.root {
             return Err(StorageError::DataCorruption {

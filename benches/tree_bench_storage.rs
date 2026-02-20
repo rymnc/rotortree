@@ -31,6 +31,7 @@ fn bench_insert_single(n_values: Vec<usize>) {
                                 flush_policy: FlushPolicy::Manual,
                                 checkpoint_policy: Default::default(),
                                 tiering: Default::default(),
+                                verify_checkpoint: true,
                             };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             (tree, dir)
@@ -66,6 +67,7 @@ fn bench_insert_many(n_values: Vec<usize>) {
                                 flush_policy: FlushPolicy::Manual,
                                 checkpoint_policy: Default::default(),
                                 tiering: Default::default(),
+                                verify_checkpoint: true,
                              };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             #[cfg(feature = "parallel")]
@@ -97,6 +99,7 @@ fn special_insert_many(bencher: divan::Bencher, n: usize) {
                 flush_policy: FlushPolicy::Manual,
                 checkpoint_policy: Default::default(),
                 tiering: Default::default(),
+                verify_checkpoint: true,
             };
             let tree =
                 RotorTree::<Blake3Hasher, 8, 11>::open(Blake3Hasher, config).unwrap();
@@ -127,6 +130,7 @@ fn bench_flush(n_values: Vec<usize>) {
                                 flush_policy: FlushPolicy::Manual,
                                 checkpoint_policy: Default::default(),
                                 tiering: Default::default(),
+                                verify_checkpoint: true,
                              };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             tree.insert_many(&leaves).unwrap();
@@ -161,6 +165,7 @@ fn bench_open_recover(n_values: Vec<usize>) {
                             flush_policy: FlushPolicy::Manual,
                             checkpoint_policy: Default::default(),
                             tiering: Default::default(),
+                            verify_checkpoint: true,
                      };
                         let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                         tree.insert_many(&leaves).unwrap();
@@ -176,7 +181,7 @@ fn bench_open_recover(n_values: Vec<usize>) {
                                 flush_policy: FlushPolicy::Manual,
                                 checkpoint_policy: Default::default(),
                                 tiering: Default::default(),
-
+                                verify_checkpoint: true,
                             };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             divan::black_box(tree.root());
@@ -211,6 +216,7 @@ fn bench_mixed_workload(n_values: Vec<usize>) {
                                 flush_policy: FlushPolicy::Manual,
                                 checkpoint_policy: Default::default(),
                                 tiering: Default::default(),
+                                verify_checkpoint: true,
                              };
                             let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                             tree.insert_many(&prepop_leaves).unwrap();
@@ -260,6 +266,7 @@ fn bench_sustained_checkpoint(n_values: Vec<usize>) {
                                     flush_policy: FlushPolicy::Manual,
                                     checkpoint_policy: CheckpointPolicy::EveryNEntries({{freq}} as u64),
                                     tiering: Default::default(),
+                                    verify_checkpoint: true,
                                 };
                                 let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                                 (tree, dir)

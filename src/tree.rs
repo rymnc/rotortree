@@ -18,6 +18,17 @@ use crate::{
 /// Number of hashes per chunk for structural sharing.
 pub(crate) const CHUNK_SIZE: usize = 128;
 
+#[cfg(feature = "parallel")]
+pub(crate) fn parallel_threshold() -> usize {
+    static THRESHOLD: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *THRESHOLD.get_or_init(|| {
+        std::env::var("ROTORTREE_PARALLEL_THRESHOLD")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(64)
+    })
+}
+
 #[cfg(not(feature = "storage"))]
 #[derive(Clone)]
 pub(crate) struct Chunk(Arc<[Hash; CHUNK_SIZE]>);
@@ -462,26 +473,54 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
         for _level in 0..depth {
             let len = current.len();
             let num_parents = len.div_ceil(N);
-            let mut parents = Vec::with_capacity(num_parents);
 
-            for parent_idx in 0..num_parents {
-                let start = parent_idx * N;
-                let end = core::cmp::min(start + N, len);
-                let count = end - start;
-
-                if count == 1 {
-                    parents.push(current[start]);
+            #[cfg(feature = "parallel")]
+            let parents = {
+                use rayon::prelude::*;
+                if num_parents >= parallel_threshold() {
+                    (0..num_parents)
+                        .into_par_iter()
+                        .map(|parent_idx| {
+                            Self::_hash_group(&current, parent_idx, len, hasher)
+                        })
+                        .collect()
                 } else {
-                    let mut children = [[0u8; 32]; N];
-                    children[..count].copy_from_slice(&current[start..end]);
-                    parents.push(hasher.hash_children(&children[..count]));
+                    (0..num_parents)
+                        .map(|parent_idx| {
+                            Self::_hash_group(&current, parent_idx, len, hasher)
+                        })
+                        .collect()
                 }
-            }
+            };
+
+            #[cfg(not(feature = "parallel"))]
+            let parents: Vec<Hash> = (0..num_parents)
+                .map(|parent_idx| Self::_hash_group(&current, parent_idx, len, hasher))
+                .collect();
 
             current = parents;
         }
 
         current.first().copied()
+    }
+
+    #[cfg(feature = "storage")]
+    fn _hash_group<H: Hasher>(
+        current: &[Hash],
+        parent_idx: usize,
+        len: usize,
+        hasher: &H,
+    ) -> Hash {
+        let start = parent_idx * N;
+        let end = core::cmp::min(start + N, len);
+        let count = end - start;
+        if count == 1 {
+            current[start]
+        } else {
+            let mut children = [[0u8; 32]; N];
+            children[..count].copy_from_slice(&current[start..end]);
+            hasher.hash_children(&children[..count])
+        }
     }
 
     pub(crate) fn snapshot(&self) -> TreeSnapshot<N, MAX_DEPTH> {
@@ -728,18 +767,6 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         Ok(())
     }
 
-    #[cfg(feature = "parallel")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "parallel")))]
-    fn _parallel_threshold() -> usize {
-        static THRESHOLD: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-        *THRESHOLD.get_or_init(|| {
-            std::env::var("ROTORTREE_PARALLEL_THRESHOLD")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(64)
-        })
-    }
-
     pub(crate) fn _insert_many(
         inner: &mut TreeInner<N, MAX_DEPTH>,
         hasher: &H,
@@ -792,7 +819,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
             #[cfg(feature = "parallel")]
             {
                 let work = num_parents - start_parent;
-                if work >= Self::_parallel_threshold() {
+                if work >= parallel_threshold() {
                     use rayon::prelude::*;
 
                     let split_at = level + 1;

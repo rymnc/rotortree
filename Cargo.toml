@@ -1,6 +1,6 @@
 [package]
 name = "rotortree"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.90.0"
@@ -34,6 +34,7 @@ proptest = "1"
 divan = "0.1"
 crabtime = "1.1.4"
 tempfile = "3"
+tikv-jemallocator = "0.6"
 
 [[bench]]
 name = "tree_bench"

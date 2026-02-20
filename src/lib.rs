@@ -12,13 +12,14 @@
 #[cfg_attr(docsrs, doc(cfg(not(feature = "std"))))]
 extern crate alloc;
 
-// only used in benches
+// only used in benches/examples
 #[cfg(test)]
 use {
     crabtime as _,
     divan as _,
     proptest as _,
     tempfile as _,
+    tikv_jemallocator as _,
 };
 
 mod error;

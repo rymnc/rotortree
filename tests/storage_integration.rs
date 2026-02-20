@@ -43,6 +43,7 @@ fn manual_config(dir: &std::path::Path) -> RotorTreeConfig {
         flush_policy: FlushPolicy::Manual,
         checkpoint_policy: CheckpointPolicy::default(),
         tiering: TieringConfig::default(),
+        verify_checkpoint: true,
     }
 }
 
@@ -564,6 +565,7 @@ fn checkpoint_on_close_policy() {
         flush_policy: FlushPolicy::Manual,
         checkpoint_policy: CheckpointPolicy::OnClose,
         tiering: TieringConfig::default(),
+        verify_checkpoint: true,
     };
     let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, config).unwrap();
 
@@ -602,6 +604,7 @@ fn checkpoint_every_n_entries() {
         flush_policy: FlushPolicy::Manual,
         checkpoint_policy: CheckpointPolicy::EveryNEntries(10),
         tiering: TieringConfig::default(),
+        verify_checkpoint: true,
     };
     let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, config).unwrap();
 
@@ -633,6 +636,7 @@ fn checkpoint_memory_threshold() {
         flush_policy: FlushPolicy::Manual,
         checkpoint_policy: CheckpointPolicy::MemoryThreshold(1),
         tiering: TieringConfig::default(),
+        verify_checkpoint: true,
     };
     let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, config).unwrap();
 
@@ -869,6 +873,7 @@ fn level_pinning() {
         flush_policy: FlushPolicy::Manual,
         checkpoint_policy: CheckpointPolicy::default(),
         tiering: TieringConfig { pin_above_level: 1 },
+        verify_checkpoint: true,
     };
     let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, config).unwrap();
 
@@ -897,6 +902,7 @@ fn level_pinning() {
         flush_policy: FlushPolicy::Manual,
         checkpoint_policy: CheckpointPolicy::default(),
         tiering: TieringConfig { pin_above_level: 1 },
+        verify_checkpoint: true,
     };
     // then
     let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, config2).unwrap();

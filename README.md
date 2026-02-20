@@ -96,6 +96,7 @@ let config = RotorTreeConfig {
     flush_policy: FlushPolicy::default(), // fsync every 10ms
     checkpoint_policy: CheckpointPolicy::default(), // manual
     tiering: TieringConfig::default(), // all in memory
+    verify_checkpoint: true, // recompute root on recovery
 };
 
 // opens existing WAL or creates a new one
@@ -218,6 +219,17 @@ there seems to be some performance variance with the storage feature enabled, as
 
 > [!NOTE]
 > There are more realistic benchmarks that simulate performance under load, i.e concurrent reads / proof generation + insertions 
+
+#### Proof Latency vs Tree size
+
+![Proof Latency vs Tree size](./assets/proof_latency_vs_tree_size.png)
+
+#### Throughput vs Tree size
+
+![Throughput vs Tree size](./assets/throughput_vs_tree_size.png)
+
+The dips noticed here are during checkpoints
+
 
 ## Future work
 
