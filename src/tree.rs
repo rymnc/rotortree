@@ -22,6 +22,10 @@ pub(crate) const CHUNK_SIZE: usize = 128;
 /// Number of chunks per immutable segment
 const CHUNKS_PER_SEGMENT: usize = 256;
 
+/// Number of parents per rayon task
+#[cfg(feature = "parallel")]
+const PAR_CHUNK_SIZE: usize = 64;
+
 #[cfg(feature = "parallel")]
 pub(crate) fn parallel_threshold() -> usize {
     static THRESHOLD: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
@@ -29,7 +33,7 @@ pub(crate) fn parallel_threshold() -> usize {
         std::env::var("ROTORTREE_PARALLEL_THRESHOLD")
             .ok()
             .and_then(|s| s.parse().ok())
-            .unwrap_or(64)
+            .unwrap_or(1024)
     })
 }
 
@@ -642,12 +646,17 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
             let parents = {
                 use rayon::prelude::*;
                 if num_parents >= parallel_threshold() {
-                    (0..num_parents)
-                        .into_par_iter()
-                        .map(|parent_idx| {
-                            Self::_hash_group(&current, parent_idx, len, hasher)
-                        })
-                        .collect()
+                    let mut buf = vec![[0u8; 32]; num_parents];
+                    buf.par_chunks_mut(PAR_CHUNK_SIZE).enumerate().for_each(
+                        |(ci, chunk)| {
+                            let base = ci * PAR_CHUNK_SIZE;
+                            for (i, slot) in chunk.iter_mut().enumerate() {
+                                *slot =
+                                    Self::_hash_group(&current, base + i, len, hasher);
+                            }
+                        },
+                    );
+                    buf
                 } else {
                     (0..num_parents)
                         .map(|parent_idx| {
@@ -975,6 +984,9 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
             [0u8; 32]
         };
 
+        #[cfg(feature = "parallel")]
+        let mut par_buf: Vec<Hash> = Vec::new();
+
         for level in 0..depth {
             let level_len = inner.levels[level].len;
             let num_parents = level_len.div_ceil(N);
@@ -991,22 +1003,26 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
                         inner.levels.split_at_mut(split_at);
                     let child_level = &child_levels[level];
 
-                    let parents: Result<Vec<Hash>, TreeError> = (start_parent
-                        ..num_parents)
-                        .into_par_iter()
-                        .map(|parent_idx| {
-                            Self::_compute_parent(
-                                child_level,
-                                parent_idx,
-                                level_len,
-                                hasher,
-                            )
-                        })
-                        .collect();
-                    let parents = parents?;
+                    par_buf.clear();
+                    par_buf.resize(work, [0u8; 32]);
+
+                    par_buf.par_chunks_mut(PAR_CHUNK_SIZE).enumerate().for_each(
+                        |(ci, chunk)| {
+                            let base = start_parent + ci * PAR_CHUNK_SIZE;
+                            for (i, slot) in chunk.iter_mut().enumerate() {
+                                *slot = Self::_compute_parent(
+                                    child_level,
+                                    base + i,
+                                    level_len,
+                                    hasher,
+                                )
+                                .expect("ensure_len guarantees valid indices");
+                            }
+                        },
+                    );
 
                     let parent_level = &mut parent_levels[0];
-                    for (i, &parent) in parents.iter().enumerate() {
+                    for (i, &parent) in par_buf.iter().enumerate() {
                         let parent_idx = start_parent + i;
                         if split_at < MAX_DEPTH {
                             parent_level.set(parent_idx, parent)?;
