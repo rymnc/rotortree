@@ -180,36 +180,7 @@ cargo bench -- --list
 
 there are some feature flagged benchmarks, refer to the [Cargo.toml entry](Cargo.toml) for more details
 
-### Sample benchmark (insert_many)
-
-Test bench: M4 pro, 14c 48g 
-
-```
-RUSTFLAGS="-C target-cpu=native" cargo bench tree_bench_storage::insert_many --features storage,parallel
-```
-
-with MAX_DEPTH=32
-
-| Benchmark | Fastest | Slowest | Median | Mean | Samples | Iters |
-|---|---|---|---|---|---|---|
-| insert_many_n2_1000 | 189.9 µs (5.265 Mitem/s) | 1.199 ms (833.9 Kitem/s) | 395.3 µs (2.529 Mitem/s) | 430 µs (2.325 Mitem/s) | 1000 | 1000 |
-| insert_many_n2_10000 | 626.3 µs (15.96 Mitem/s) | 4.37 ms (2.288 Mitem/s) | 1.626 ms (6.149 Mitem/s) | 1.695 ms (5.898 Mitem/s) | 1000 | 1000 |
-| insert_many_n2_100000 | 4.33 ms (23.09 Mitem/s) | 28.49 ms (3.509 Mitem/s) | 6.063 ms (16.49 Mitem/s) | 6.538 ms (15.29 Mitem/s) | 1000 | 1000 |
-| insert_many_n2_1000000 | 38.1 ms (26.24 Mitem/s) | 59.77 ms (16.72 Mitem/s) | 39.46 ms (25.33 Mitem/s) | 39.66 ms (25.21 Mitem/s) | 1000 | 1000 |
-| insert_many_n4_1000 | 155.1 µs (6.444 Mitem/s) | 1.124 ms (889.1 Kitem/s) | 315.9 µs (3.164 Mitem/s) | 346.9 µs (2.882 Mitem/s) | 1000 | 1000 |
-| insert_many_n4_10000 | 408.4 µs (24.47 Mitem/s) | 2.735 ms (3.655 Mitem/s) | 1.137 ms (8.787 Mitem/s) | 1.27 ms (7.871 Mitem/s) | 1000 | 1000 |
-| insert_many_n4_100000 | 2.3 ms (43.46 Mitem/s) | 6.962 ms (14.36 Mitem/s) | 3.707 ms (26.96 Mitem/s) | 3.726 ms (26.83 Mitem/s) | 1000 | 1000 |
-| insert_many_n4_1000000 | 16.44 ms (60.8 Mitem/s) | 25.69 ms (38.91 Mitem/s) | 18.6 ms (53.75 Mitem/s) | 18.65 ms (53.59 Mitem/s) | 1000 | 1000 |
-| insert_many_n8_1000 | 145.3 µs (6.88 Mitem/s) | 1.913 ms (522.6 Kitem/s) | 282.6 µs (3.538 Mitem/s) | 313.8 µs (3.186 Mitem/s) | 1000 | 1000 |
-| insert_many_n8_10000 | 266 µs (37.58 Mitem/s) | 2.168 ms (4.61 Mitem/s) | 839.2 µs (11.91 Mitem/s) | 920.6 µs (10.86 Mitem/s) | 1000 | 1000 |
-| insert_many_n8_100000 | 2.007 ms (49.8 Mitem/s) | 6.924 ms (14.44 Mitem/s) | 3.153 ms (31.71 Mitem/s) | 3.234 ms (30.91 Mitem/s) | 1000 | 1000 |
-| insert_many_n8_1000000 | 11.51 ms (86.86 Mitem/s) | 16.89 ms (59.19 Mitem/s) | 12.46 ms (80.19 Mitem/s) | 12.5 ms (79.97 Mitem/s) | 1000 | 1000 |
-| insert_many_n16_1000 | 50.79 µs (19.68 Mitem/s) | 346.8 µs (2.883 Mitem/s) | 139.5 µs (7.166 Mitem/s) | 152.5 µs (6.553 Mitem/s) | 1000 | 1000 |
-| insert_many_n16_10000 | 394.5 µs (25.34 Mitem/s) | 2.265 ms (4.413 Mitem/s) | 675.8 µs (14.79 Mitem/s) | 744.7 µs (13.42 Mitem/s) | 1000 | 1000 |
-| insert_many_n16_100000 | 1.507 ms (66.34 Mitem/s) | 5.673 ms (17.62 Mitem/s) | 2.646 ms (37.78 Mitem/s) | 2.843 ms (35.16 Mitem/s) | 1000 | 1000 |
-| insert_many_n16_1000000 | **8.626 ms (115.9 Mitem/s)** | 14.2 ms (70.39 Mitem/s) | 9.779 ms (102.2 Mitem/s) | 9.78 ms (102.2 Mitem/s) | 1000 | 1000 |
-
-peak insertions/sec is ~ 115.9M leaves/sec, overall, the design scales well with increased branching factor + parallelism
+Head over to https://rymnc.github.io/rotortree/ which has the latest benchmark results (~380 benchmarks)
 
 <!-- ANCHOR: devnote --> 
 
