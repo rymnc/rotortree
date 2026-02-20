@@ -1,5 +1,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::{
+    boxed::Box,
     sync::Arc,
     vec::Vec,
 };
@@ -17,6 +18,9 @@ use crate::{
 
 /// Number of hashes per chunk for structural sharing.
 pub(crate) const CHUNK_SIZE: usize = 128;
+
+/// Number of chunks per immutable segment
+const CHUNKS_PER_SEGMENT: usize = 256;
 
 #[cfg(feature = "parallel")]
 pub(crate) fn parallel_threshold() -> usize {
@@ -145,15 +149,15 @@ fn u64_to_usize(val: u64) -> Result<usize, TreeError> {
     usize::try_from(val).map_err(|_| TreeError::CapacityExceeded)
 }
 
-/// A single level of the tree stored as fixed-size chunks plus a
+/// A single level of the tree stored as segmented chunks plus a
 /// fixed-size tail buffer.
-///
-/// Completed chunks are `Arc`-wrapped for zero-copy sharing with
-/// snapshots
 #[derive(Clone)]
 pub(crate) struct ChunkedLevel {
-    /// Immutable completed chunks, shared across snapshots.
-    chunks: Vec<Chunk>,
+    /// Immutable segments of committed chunks, shared with snapshots.
+    segments: Vec<Arc<[Chunk; CHUNKS_PER_SEGMENT]>>,
+    /// Mutable buffer of committed chunks not yet frozen into a segment.
+    /// At most `CHUNKS_PER_SEGMENT - 1` items.
+    pending: Vec<Chunk>,
     /// Fixed-size tail buffer (partially filled).
     tail: [Hash; CHUNK_SIZE],
     /// Number of valid entries in `tail`.
@@ -165,10 +169,29 @@ pub(crate) struct ChunkedLevel {
 impl ChunkedLevel {
     fn new() -> Self {
         Self {
-            chunks: Vec::new(),
+            segments: Vec::new(),
+            pending: Vec::new(),
             tail: [[0u8; 32]; CHUNK_SIZE],
             tail_len: 0,
             len: 0,
+        }
+    }
+
+    /// Total number of committed chunks (segments + pending).
+    pub(crate) fn chunk_count(&self) -> usize {
+        self.segments.len() * CHUNKS_PER_SEGMENT + self.pending.len()
+    }
+
+    /// Resolve a chunk index to a slice reference.
+    #[inline(always)]
+    fn chunk_slice(&self, chunk_idx: usize) -> &[Hash; CHUNK_SIZE] {
+        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
+        if chunk_idx < committed {
+            let seg_idx = chunk_idx / CHUNKS_PER_SEGMENT;
+            let seg_off = chunk_idx % CHUNKS_PER_SEGMENT;
+            self.segments[seg_idx][seg_off].as_slice()
+        } else {
+            self.pending[chunk_idx - committed].as_slice()
         }
     }
 
@@ -176,8 +199,8 @@ impl ChunkedLevel {
     fn get(&self, index: usize) -> Result<Hash, TreeError> {
         let chunk_idx = index / CHUNK_SIZE;
         let offset = index % CHUNK_SIZE;
-        if chunk_idx < self.chunks.len() {
-            Ok(self.chunks[chunk_idx].as_slice()[offset])
+        if chunk_idx < self.chunk_count() {
+            Ok(self.chunk_slice(chunk_idx)[offset])
         } else {
             Ok(self.tail[offset])
         }
@@ -189,8 +212,8 @@ impl ChunkedLevel {
         let chunk_idx = start / CHUNK_SIZE;
         let offset = start % CHUNK_SIZE;
         if offset + count <= CHUNK_SIZE {
-            let src = if chunk_idx < self.chunks.len() {
-                &self.chunks[chunk_idx].as_slice()[offset..offset + count]
+            let src = if chunk_idx < self.chunk_count() {
+                &self.chunk_slice(chunk_idx)[offset..offset + count]
             } else {
                 &self.tail[offset..offset + count]
             };
@@ -209,8 +232,14 @@ impl ChunkedLevel {
         }
         let chunk_idx = index / CHUNK_SIZE;
         let offset = index % CHUNK_SIZE;
-        if chunk_idx < self.chunks.len() {
-            self.chunks[chunk_idx].make_mut()[offset] = value;
+        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
+        if chunk_idx < committed {
+            let seg_idx = chunk_idx / CHUNKS_PER_SEGMENT;
+            let seg_off = chunk_idx % CHUNKS_PER_SEGMENT;
+            Arc::make_mut(&mut self.segments[seg_idx])[seg_off].make_mut()[offset] =
+                value;
+        } else if chunk_idx - committed < self.pending.len() {
+            self.pending[chunk_idx - committed].make_mut()[offset] = value;
         } else {
             self.tail[offset] = value;
         }
@@ -255,13 +284,12 @@ impl ChunkedLevel {
         // dont use tail for full chunks
         let full_chunks = remaining.len() / CHUNK_SIZE;
         if full_chunks > 0 {
-            self.chunks.reserve(full_chunks);
             for i in 0..full_chunks {
                 let start = i * CHUNK_SIZE;
                 let chunk: [Hash; CHUNK_SIZE] = remaining[start..start + CHUNK_SIZE]
                     .try_into()
                     .expect("slice len == CHUNK_SIZE; qed");
-                self.chunks.push(Chunk::new_memory(chunk));
+                self.push_chunk(Chunk::new_memory(chunk));
             }
             remaining = &remaining[full_chunks * CHUNK_SIZE..];
         }
@@ -293,9 +321,8 @@ impl ChunkedLevel {
         let remaining = needed - filled;
         let full_chunks = remaining / CHUNK_SIZE;
         if full_chunks > 0 {
-            self.chunks.reserve(full_chunks);
             for _ in 0..full_chunks {
-                self.chunks.push(Chunk::new_memory([[0u8; 32]; CHUNK_SIZE]));
+                self.push_chunk(Chunk::new_memory([[0u8; 32]; CHUNK_SIZE]));
             }
             filled += full_chunks * CHUNK_SIZE;
         }
@@ -307,24 +334,104 @@ impl ChunkedLevel {
         Ok(())
     }
 
-    /// Promote the full tail into a chunk.
+    /// Promote the full tail into a chunk, freezing pending if full
     fn promote_tail(&mut self) {
         debug_assert_eq!(self.tail_len, CHUNK_SIZE);
-        self.chunks.push(Chunk::new_memory(self.tail));
+        self.push_chunk(Chunk::new_memory(self.tail));
         self.tail = [[0u8; 32]; CHUNK_SIZE];
         self.tail_len = 0;
     }
 
-    /// Access the committed chunks
-    #[cfg(feature = "storage")]
-    pub(crate) fn chunks(&self) -> &[Chunk] {
-        &self.chunks
+    /// Push a chunk to pending, freezing into a segment when full
+    fn push_chunk(&mut self, chunk: Chunk) {
+        self.pending.push(chunk);
+        if self.pending.len() == CHUNKS_PER_SEGMENT {
+            self.freeze_pending();
+        }
     }
 
-    /// Mutable access to the committed chunks
+    /// Freeze the full pending buffer into an immutable segment
+    fn freeze_pending(&mut self) {
+        debug_assert_eq!(self.pending.len(), CHUNKS_PER_SEGMENT);
+        let pending = core::mem::take(&mut self.pending);
+        let boxed_arr: Box<[Chunk; CHUNKS_PER_SEGMENT]> = pending
+            .into_boxed_slice()
+            .try_into()
+            .unwrap_or_else(|_| unreachable!()); // qed
+        self.segments.push(Arc::from(boxed_arr));
+    }
+
+    /// Collect chunks from index `already` onward
     #[cfg(feature = "storage")]
-    pub(crate) fn chunks_mut(&mut self) -> &mut Vec<Chunk> {
-        &mut self.chunks
+    pub(crate) fn chunks_since(&self, already: usize) -> Vec<Chunk> {
+        let total = self.chunk_count();
+        if already >= total {
+            return Vec::new();
+        }
+        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
+        let mut result = Vec::with_capacity(total - already);
+
+        // Collect from segments
+        if already < committed {
+            let start_seg = already / CHUNKS_PER_SEGMENT;
+            let start_off = already % CHUNKS_PER_SEGMENT;
+            for (seg_i, segment) in self.segments.iter().enumerate().skip(start_seg) {
+                let from = if seg_i == start_seg { start_off } else { 0 };
+                for chunk in &segment[from..] {
+                    result.push(chunk.clone());
+                }
+            }
+        }
+
+        // Collect from pending
+        let pending_start = already.saturating_sub(committed);
+        if pending_start < self.pending.len() {
+            for chunk in &self.pending[pending_start..] {
+                result.push(chunk.clone());
+            }
+        }
+
+        result
+    }
+
+    /// Remap the first `count` chunks to mmap-backed chunks
+    #[cfg(feature = "storage")]
+    pub(crate) fn remap_chunks(
+        &mut self,
+        count: usize,
+        region: &Arc<crate::storage::data::MmapRegion>,
+    ) {
+        use crate::storage::checkpoint::CHUNK_BYTE_SIZE;
+
+        let total = self.chunk_count();
+        let remap_count = count.min(total);
+        if remap_count == 0 {
+            return;
+        }
+
+        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
+        let mut unmapped: Vec<Chunk> =
+            Vec::with_capacity(total.saturating_sub(remap_count));
+        for chunk_idx in remap_count..total {
+            if chunk_idx < committed {
+                let seg_idx = chunk_idx / CHUNKS_PER_SEGMENT;
+                let seg_off = chunk_idx % CHUNKS_PER_SEGMENT;
+                unmapped.push(self.segments[seg_idx][seg_off].clone());
+            } else {
+                unmapped.push(self.pending[chunk_idx - committed].clone());
+            }
+        }
+
+        self.segments.clear();
+        self.pending.clear();
+
+        for chunk_idx in 0..remap_count {
+            let offset = chunk_idx * CHUNK_BYTE_SIZE;
+            self.push_chunk(Chunk::new_mapped(Arc::clone(region), offset));
+        }
+        for chunk in unmapped {
+            self.push_chunk(chunk);
+        }
     }
 
     /// Access the tail buffer
@@ -333,10 +440,21 @@ impl ChunkedLevel {
         &self.tail
     }
 
+    #[cfg(test)]
+    fn get_chunk(&self, idx: usize) -> &Chunk {
+        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
+        if idx < committed {
+            &self.segments[idx / CHUNKS_PER_SEGMENT][idx % CHUNKS_PER_SEGMENT]
+        } else {
+            &self.pending[idx - committed]
+        }
+    }
+
     /// Create a snapshot level
     fn snapshot(&self) -> SnapshotLevel {
         SnapshotLevel {
-            chunks: self.chunks.clone(),
+            segments: self.segments.clone(),
+            pending: self.pending.clone(),
             tail: self.tail,
             len: self.len,
         }
@@ -345,23 +463,43 @@ impl ChunkedLevel {
 
 /// Immutable view of a single tree level for proof generation.
 pub(crate) struct SnapshotLevel {
-    chunks: Vec<Chunk>,
+    segments: Vec<Arc<[Chunk; CHUNKS_PER_SEGMENT]>>,
+    pending: Vec<Chunk>,
     tail: [Hash; CHUNK_SIZE],
     len: usize,
 }
 
 impl SnapshotLevel {
     const EMPTY: Self = Self {
-        chunks: Vec::new(),
+        segments: Vec::new(),
+        pending: Vec::new(),
         tail: [[0u8; 32]; CHUNK_SIZE],
         len: 0,
     };
 
+    /// Total number of committed chunks (segments + pending).
+    fn chunk_count(&self) -> usize {
+        self.segments.len() * CHUNKS_PER_SEGMENT + self.pending.len()
+    }
+
+    /// Resolve a chunk index to a slice reference.
+    #[inline(always)]
+    fn chunk_slice(&self, chunk_idx: usize) -> &[Hash; CHUNK_SIZE] {
+        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
+        if chunk_idx < committed {
+            let seg_idx = chunk_idx / CHUNKS_PER_SEGMENT;
+            let seg_off = chunk_idx % CHUNKS_PER_SEGMENT;
+            self.segments[seg_idx][seg_off].as_slice()
+        } else {
+            self.pending[chunk_idx - committed].as_slice()
+        }
+    }
+
     pub(crate) fn get(&self, index: usize) -> Result<Hash, TreeError> {
         let chunk_idx = index / CHUNK_SIZE;
         let offset = index % CHUNK_SIZE;
-        if chunk_idx < self.chunks.len() {
-            Ok(self.chunks[chunk_idx].as_slice()[offset])
+        if chunk_idx < self.chunk_count() {
+            Ok(self.chunk_slice(chunk_idx)[offset])
         } else {
             Ok(self.tail[offset])
         }
@@ -371,8 +509,8 @@ impl SnapshotLevel {
         let chunk_idx = start / CHUNK_SIZE;
         let offset = start % CHUNK_SIZE;
         if offset + count <= CHUNK_SIZE {
-            let src = if chunk_idx < self.chunks.len() {
-                &self.chunks[chunk_idx].as_slice()[offset..offset + count]
+            let src = if chunk_idx < self.chunk_count() {
+                &self.chunk_slice(chunk_idx)[offset..offset + count]
             } else {
                 &self.tail[offset..offset + count]
             };
@@ -386,6 +524,17 @@ impl SnapshotLevel {
 
     pub(crate) fn len(&self) -> usize {
         self.len
+    }
+
+    /// Get a reference to a chunk by index (test helper).
+    #[cfg(test)]
+    fn get_chunk(&self, idx: usize) -> &Chunk {
+        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
+        if idx < committed {
+            &self.segments[idx / CHUNKS_PER_SEGMENT][idx % CHUNKS_PER_SEGMENT]
+        } else {
+            &self.pending[idx - committed]
+        }
     }
 }
 
@@ -435,7 +584,8 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
         }
     }
 
-    /// Replace a level's contents from checkpoint data
+    /// Replace a level's contents from checkpoint data.
+    /// Partitions `chunks` into segments and pending.
     #[cfg(feature = "storage")]
     pub(crate) fn set_level_from_parts(
         &mut self,
@@ -445,8 +595,22 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
         tail_len: usize,
         len: usize,
     ) {
+        let full_segments = chunks.len() / CHUNKS_PER_SEGMENT;
+        let mut segments = Vec::with_capacity(full_segments);
+        let mut drain = chunks.into_iter();
+        for _ in 0..full_segments {
+            let seg: Vec<Chunk> = drain.by_ref().take(CHUNKS_PER_SEGMENT).collect();
+            let boxed: Box<[Chunk; CHUNKS_PER_SEGMENT]> = seg
+                .into_boxed_slice()
+                .try_into()
+                .unwrap_or_else(|_| unreachable!());
+            segments.push(Arc::from(boxed));
+        }
+        let pending: Vec<Chunk> = drain.collect();
+
         self.levels[level_idx] = ChunkedLevel {
-            chunks,
+            segments,
+            pending,
             tail,
             tail_len,
             len,
@@ -978,13 +1142,13 @@ mod tests {
         for i in 0..CHUNK_SIZE {
             level.push(leaf(i as u8)).unwrap();
         }
-        assert_eq!(level.chunks.len(), 1);
+        assert_eq!(level.chunk_count(), 1);
         assert_eq!(level.tail_len, 0);
         assert_eq!(level.len, CHUNK_SIZE);
 
         // One more goes into the new tail.
         level.push(leaf(0xFF)).unwrap();
-        assert_eq!(level.chunks.len(), 1);
+        assert_eq!(level.chunk_count(), 1);
         assert_eq!(level.tail_len, 1);
         assert_eq!(level.len, CHUNK_SIZE + 1);
     }
@@ -998,7 +1162,7 @@ mod tests {
         let snap = level.snapshot();
         assert_eq!(snap.len(), level.len);
         // The completed chunk Arc is shared.
-        assert!(Chunk::ptr_eq(&level.chunks[0], &snap.chunks[0]));
+        assert!(Chunk::ptr_eq(level.get_chunk(0), snap.get_chunk(0)));
         // Data matches.
         for i in 0..level.len {
             assert_eq!(level.get(i).unwrap(), snap.get(i).unwrap());

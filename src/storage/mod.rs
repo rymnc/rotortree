@@ -220,7 +220,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
             let mut level_data = Vec::with_capacity(active_levels);
 
             for level_idx in 0..active_levels {
-                let total_chunks = state.inner.levels[level_idx].chunks().len();
+                let total_chunks = state.inner.levels[level_idx].chunk_count();
                 let already = if level_idx < state.checkpointed_chunks.len() {
                     state.checkpointed_chunks[level_idx]
                 } else {
@@ -228,7 +228,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
                 };
 
                 let new_chunks: Vec<Chunk> =
-                    state.inner.levels[level_idx].chunks()[already..].to_vec();
+                    state.inner.levels[level_idx].chunks_since(already);
 
                 let tail = *state.inner.levels[level_idx].tail_data();
 
@@ -313,14 +313,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
                         snapshot_total,
                     )?
                 {
-                    let chunks = state.inner.levels[level_idx].chunks_mut();
-                    let remap_count = snapshot_total.min(chunks.len());
-                    for (chunk_idx, chunk) in
-                        chunks.iter_mut().enumerate().take(remap_count)
-                    {
-                        let offset = chunk_idx * checkpoint::CHUNK_BYTE_SIZE;
-                        *chunk = Chunk::new_mapped(Arc::clone(&region), offset);
-                    }
+                    state.inner.levels[level_idx].remap_chunks(snapshot_total, &region);
                 }
 
                 state.checkpointed_chunks[level_idx] = snapshot_total;

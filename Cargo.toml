@@ -64,6 +64,10 @@ required-features = ["storage"]
 name = "bulk_load"
 required-features = ["storage", "parallel", "blake3"]
 
+[[example]]
+name = "profile_storage"
+required-features = ["storage", "parallel", "blake3"]
+
 [profile.profiling]
 inherits = "release"
 debug = true
