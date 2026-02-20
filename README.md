@@ -1,7 +1,7 @@
 # rotortree ~ nullifier databases done right*
 
 <p align="center">
-  <img src="./assets/title.png" alt="title" width="30%">
+  <img src="./assets/title.png" alt="title" width="100%">
 </p>
 
 
