@@ -222,3 +222,4 @@ there seems to be some performance variance with the storage feature enabled, as
 ## Future work
 
 1. optimize `ceil_log_n` by precomputing the table
+2. run benchmarks in an isolated environment for better estimations
