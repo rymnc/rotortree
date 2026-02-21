@@ -1,5 +1,5 @@
 # Simple workflow for deploying static content to GitHub Pages
-name: Deploy benchmarks viewer
+name: Deploy github pages site
 
 on:
   # Runs on pushes targeting the default branch
@@ -37,8 +37,9 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Install wasm-pack
-        run: cargo install wasm-pack
+      - uses: jetli/wasm-pack-action@v0.4.0
+        with:
+          version: '0.14.0'
 
       - name: Build rotortree-viz
         run: wasm-pack build --target web --out-dir www/pkg
