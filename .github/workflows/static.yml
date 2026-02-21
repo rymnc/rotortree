@@ -38,7 +38,7 @@ jobs:
           targets: wasm32-unknown-unknown
 
       - name: Install wasm-pack
-        run: curl https://drager.github.io/wasm-pack/installer/init.sh -sSf | sh
+        run: cargo install wasm-pack
 
       - name: Build rotortree-viz
         run: wasm-pack build --target web --out-dir www/pkg
