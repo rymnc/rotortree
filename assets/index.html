@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rotortree</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1a1a1a;
+  background: #F5EEDD;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 32px 40px;
+}
+h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #096B68;
+  margin-bottom: 4px;
+}
+.meta {
+  color: #096B68;
+  font-size: 11px;
+  margin-bottom: 32px;
+  opacity: 0.7;
+}
+.buttons {
+  display: flex;
+  gap: 16px;
+}
+.btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 12px 32px;
+  border: 2px solid #096B68;
+  border-radius: 6px;
+  background: #096B68;
+  color: #F5EEDD;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.btn:hover {
+  background: #0a7d79;
+  border-color: #0a7d79;
+}
+.btn.outline {
+  background: transparent;
+  color: #096B68;
+}
+.btn.outline:hover {
+  background: rgba(9, 107, 104, 0.1);
+}
+</style>
+</head>
+<body>
+<h1>rotortree</h1>
+<p class="meta">n-ary lean incremental merkle tree</p>
+<div class="buttons">
+  <a href="benchmarks" class="btn">benchmarks</a>
+  <a href="viz" class="btn outline">viz</a>
+</div>
+</body>
+</html>

@@ -48,6 +48,7 @@ jobs:
       - name: Assemble site
         run: |
           mkdir -p _site/benchmarks _site/viz
+          cp assets/index.html _site/
           cp assets/benchmarks/* _site/benchmarks/
           cp -r rotortree-viz/www/* _site/viz/
 
