@@ -193,7 +193,7 @@ cargo bench -- --list
 
 there are some feature flagged benchmarks, refer to the [Cargo.toml entry](Cargo.toml) for more details
 
-Head over to https://rymnc.github.io/rotortree/ which has the latest benchmark results (~380 benchmarks)
+Head over to https://rymnc.github.io/rotortree/benchmarks which has the latest benchmark results (~380 benchmarks)
 
 <!-- ANCHOR: devnote --> 
 

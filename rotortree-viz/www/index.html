@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rotortree viz</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1a1a1a;
+  background: #F5EEDD;
+  padding: 32px 40px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #096B68;
+  margin-bottom: 4px;
+}
+.meta {
+  color: #096B68;
+  font-size: 11px;
+  margin-bottom: 24px;
+  opacity: 0.7;
+}
+
+/* Controls bar */
+.controls-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: #90D1CA;
+  border-radius: 6px;
+  margin-bottom: 16px;
+}
+.controls-bar label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #096B68;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.btn-group {
+  display: flex;
+  gap: 0;
+}
+.btn-group .btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border: 1px solid #096B68;
+  background: transparent;
+  color: #096B68;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.btn-group .btn:first-child { border-radius: 4px 0 0 4px; }
+.btn-group .btn:last-child { border-radius: 0 4px 4px 0; }
+.btn-group .btn:not(:first-child) { border-left: none; }
+.btn-group .btn:hover { background: rgba(9,107,104,0.1); }
+.btn-group .btn.active {
+  background: #096B68;
+  color: #F5EEDD;
+  font-weight: 600;
+}
+
+.btn-action {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border: 1px solid #096B68;
+  border-radius: 4px;
+  background: #096B68;
+  color: #F5EEDD;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.btn-action:hover { background: #0a7d79; }
+.btn-action.danger {
+  background: transparent;
+  color: #096B68;
+  border: 1px solid #096B68;
+}
+.btn-action.danger:hover { background: rgba(9,107,104,0.1); }
+
+.controls-bar input[type="number"] {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  width: 56px;
+  padding: 4px 6px;
+  border: 2px solid #096B68;
+  border-radius: 6px;
+  background: white;
+  color: #096B68;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.controls-bar input[type="number"]::-webkit-inner-spin-button,
+.controls-bar input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.controls-bar input[type="number"]:focus {
+  outline: none;
+  border-color: #096B68;
+  box-shadow: 0 0 0 2px rgba(9,107,104,0.2);
+}
+
+.stats {
+  margin-left: auto;
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: #096B68;
+}
+.stats span { font-weight: 700; }
+
+/* Tree wrapper (holds controls + viewport) */
+.tree-wrapper {
+  position: relative;
+  margin-bottom: 8px;
+}
+
+/* Tree area */
+.tree-container {
+  position: relative;
+  height: max(400px, 60vh);
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid rgba(18,153,144,0.15);
+  border-radius: 6px;
+  background: white;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.tree-container.dragging { cursor: grabbing; }
+.tree-inner {
+  transform-origin: 0 0;
+  display: inline-block;
+  will-change: transform;
+}
+svg#tree-svg { display: block; }
+
+/* Zoom controls — fixed outside the scrollable area */
+.zoom-controls {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  z-index: 10;
+  pointer-events: auto;
+}
+.zoom-btn {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(18,153,144,0.3);
+  border-radius: 4px;
+  background: rgba(245,238,221,0.9);
+  color: #096B68;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s;
+  line-height: 1;
+  padding: 0;
+}
+.zoom-btn:hover { background: #90D1CA; color: #096B68; }
+.zoom-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  min-width: 36px;
+  height: 28px;
+  border: 1px solid rgba(18,153,144,0.3);
+  border-radius: 4px;
+  background: rgba(245,238,221,0.9);
+  color: #096B68;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+}
+
+/* SVG styles */
+.node-rect {
+  fill: white;
+  stroke: #096B68;
+  stroke-width: 1.5;
+  cursor: pointer;
+  transition: fill 0.1s;
+}
+.node-rect:hover { fill: rgba(144,209,202,0.25); }
+.node-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  fill: #1a1a1a;
+  text-anchor: middle;
+  dominant-baseline: central;
+  pointer-events: none;
+  user-select: none;
+}
+.node-level-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  fill: #129990;
+  text-anchor: end;
+  dominant-baseline: central;
+  opacity: 0.6;
+}
+.edge {
+  fill: none;
+  stroke: #90D1CA;
+  stroke-width: 1.5;
+}
+.edge-lifted {
+  stroke-dasharray: 4 3;
+  opacity: 0.5;
+}
+
+/* Animations (fast) */
+@keyframes node-appear {
+  from { opacity: 0; transform: scale(0.5); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes pulse-glow {
+  0% { filter: drop-shadow(0 0 0 rgba(18,153,144,0)); }
+  50% { filter: drop-shadow(0 0 6px rgba(18,153,144,0.5)); }
+  100% { filter: drop-shadow(0 0 0 rgba(18,153,144,0)); }
+}
+.node-appear { animation: node-appear 0.15s ease-out forwards; }
+.node-pulse { animation: pulse-glow 0.25s ease-in-out; }
+
+.node-highlighted .node-rect {
+  fill: #90D1CA !important;
+  stroke: #096B68;
+  stroke-width: 2.5;
+}
+.node-highlighted .node-text {
+  fill: #096B68;
+  font-weight: 700;
+}
+.sibling-highlighted .node-rect {
+  fill: rgba(144,209,202,0.3) !important;
+  stroke: #129990;
+  stroke-width: 1.5;
+  stroke-dasharray: 3 2;
+}
+.edge-highlighted {
+  stroke: #096B68 !important;
+  stroke-width: 2.5 !important;
+  opacity: 1 !important;
+}
+
+/* Info bar */
+.info-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  padding: 8px 14px;
+  background: rgba(144,209,202,0.15);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.info-bar .root-hash { color: #096B68; font-weight: 600; }
+.info-bar .hint { color: #888; font-style: italic; }
+
+/* Proof panel */
+.proof-panel {
+  font-size: 12px;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.15s ease, padding 0.15s ease;
+  background: white;
+  border-radius: 6px;
+  border: 1px solid rgba(18,153,144,0.15);
+}
+.proof-panel.open {
+  max-height: 600px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.proof-panel h3 {
+  font-size: 13px;
+  color: #096B68;
+  margin-bottom: 6px;
+}
+.proof-level {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(18,153,144,0.1);
+}
+.proof-level:last-child { border-bottom: none; }
+.proof-level .level-num {
+  font-weight: 600;
+  color: #129990;
+  min-width: 28px;
+}
+.proof-level .position { color: #888; font-size: 11px; }
+.proof-level .siblings { display: flex; gap: 4px; }
+.proof-level .sib-hash {
+  background: rgba(144,209,202,0.2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #096B68;
+  font-size: 11px;
+}
+.proof-level .lifted { color: #aaa; font-style: italic; font-size: 11px; }
+
+/* Empty state */
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px;
+  color: #aaa;
+  font-size: 13px;
+}
+.empty-state .icon { font-size: 36px; margin-bottom: 8px; opacity: 0.3; }
+
+@media (max-width: 768px) {
+  body { padding: 16px; }
+  .stats { margin-left: 0; }
+}
+</style>
+</head>
+<body>
+
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+<h1>rotortree viz</h1>
+<a href="../benchmarks/" style="font-size:12px;color:#096B68;text-decoration:none;border:1px solid #096B68;padding:4px 10px;border-radius:4px">&larr; benchmarks</a>
+</div>
+<div class="meta">interactive N-ary LeanIMT visualizer&semi; bindings from rust</div>
+
+<div class="controls-bar">
+  <label>N</label>
+  <div class="btn-group" id="n-selector">
+    <button class="btn active" data-n="2">2</button>
+    <button class="btn" data-n="4">4</button>
+    <button class="btn" data-n="8">8</button>
+    <button class="btn" data-n="16">16</button>
+  </div>
+
+  <button class="btn-action" id="btn-insert">+ Insert</button>
+
+  <label>Batch</label>
+  <input type="number" id="batch-size" value="10" min="1" max="256">
+  <button class="btn-action" id="btn-batch">++ Batch</button>
+
+  <button class="btn-action danger" id="btn-clear">Clear</button>
+
+  <div class="stats">
+    <div>Size: <span id="stat-size">0</span></div>
+    <div>Depth: <span id="stat-depth">0</span></div>
+  </div>
+</div>
+
+<div class="info-bar">
+  <div>Root: <span class="root-hash" id="root-hash">(empty)</span></div>
+  <div class="hint" id="hint-text">Click any leaf node to generate a proof</div>
+</div>
+
+<div class="proof-panel" id="proof-panel">
+  <h3>Merkle Proof for leaf #<span id="proof-leaf-index"></span></h3>
+  <div id="proof-levels"></div>
+</div>
+
+<div class="tree-wrapper">
+  <div class="zoom-controls">
+    <button class="zoom-btn" id="zoom-out" title="Zoom out (-)">&#8722;</button>
+    <div class="zoom-label" id="zoom-label">100%</div>
+    <button class="zoom-btn" id="zoom-in" title="Zoom in (+)">+</button>
+    <button class="zoom-btn" id="zoom-fit" title="Fit to view (0)">&#8596;</button>
+  </div>
+  <div class="tree-container" id="tree-container">
+    <div class="empty-state" id="empty-state">
+      <div class="icon">&#9651;</div>
+      Insert leaves to visualize the Merkle tree
+    </div>
+    <div class="tree-inner" id="tree-inner">
+      <svg id="tree-svg" style="display:none;"></svg>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import init, { TreeN2, TreeN4, TreeN8, TreeN16 } from './pkg/rotortree_viz.js';
+
+await init();
+
+const TreeClasses = { 2: TreeN2, 4: TreeN4, 8: TreeN8, 16: TreeN16 };
+let currentN = 2;
+let tree = null;
+let insertCounter = 0;
+let proofLeafIndex = null;
+
+const svg = document.getElementById('tree-svg');
+const emptyState = document.getElementById('empty-state');
+const statSize = document.getElementById('stat-size');
+const statDepth = document.getElementById('stat-depth');
+const rootHash = document.getElementById('root-hash');
+const hintText = document.getElementById('hint-text');
+const proofPanel = document.getElementById('proof-panel');
+const proofLeafEl = document.getElementById('proof-leaf-index');
+const proofLevelsEl = document.getElementById('proof-levels');
+const batchInput = document.getElementById('batch-size');
+const treeContainer = document.getElementById('tree-container');
+const treeInner = document.getElementById('tree-inner');
+const zoomLabel = document.getElementById('zoom-label');
+
+// ── Zoom & Pan ─────────────────────────────────────────
+let zoomLevel = 1;
+let panX = 0;
+let panY = 0;
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 5;
+const ZOOM_STEP = 0.15;
+const ZOOM_SENSITIVITY = 0.009; // damping for trackpad/wheel
+
+function applyTransform() {
+  treeInner.style.transform = `translate(${panX}px, ${panY}px) scale(${zoomLevel})`;
+  zoomLabel.textContent = `${Math.round(zoomLevel * 100)}%`;
+}
+
+function zoomAt(newZoom, cx, cy) {
+  newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom));
+  // Adjust pan so the point under (cx, cy) stays fixed
+  const ratio = newZoom / zoomLevel;
+  panX = cx - ratio * (cx - panX);
+  panY = cy - ratio * (cy - panY);
+  zoomLevel = newZoom;
+  applyTransform();
+}
+
+function setZoom(z) {
+  // Zoom towards center of container
+  const rect = treeContainer.getBoundingClientRect();
+  zoomAt(z, rect.width / 2, rect.height / 2);
+}
+
+function zoomToFit() {
+  if (!svg.style.display || svg.style.display === 'none') return;
+  const svgW = parseFloat(svg.getAttribute('width'));
+  const svgH = parseFloat(svg.getAttribute('height'));
+  if (!svgW || !svgH) return;
+  const cW = treeContainer.clientWidth;
+  const cH = treeContainer.clientHeight;
+  const PAD = 16;
+  // Fit so entire tree is visible, clamped to [ZOOM_MIN, 1.5]
+  const fitZoom = Math.max(ZOOM_MIN, Math.min((cW - PAD) / svgW, (cH - PAD) / svgH, 1.5));
+  zoomLevel = fitZoom;
+  // Center the scaled tree in the viewport
+  panX = (cW - svgW * fitZoom) / 2;
+  panY = (cH - svgH * fitZoom) / 2;
+  applyTransform();
+}
+
+document.getElementById('zoom-in').addEventListener('click', () => setZoom(zoomLevel + ZOOM_STEP));
+document.getElementById('zoom-out').addEventListener('click', () => setZoom(zoomLevel - ZOOM_STEP));
+document.getElementById('zoom-fit').addEventListener('click', zoomToFit);
+
+// Wheel / trackpad zoom — zoom toward cursor position
+treeContainer.addEventListener('wheel', e => {
+  e.preventDefault();
+  const rect = treeContainer.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+
+  if (e.ctrlKey || e.metaKey) {
+    // Pinch-to-zoom (trackpad sends ctrlKey + small deltaY)
+    const factor = 1 - e.deltaY * ZOOM_SENSITIVITY;
+    zoomAt(zoomLevel * factor, cx, cy);
+  } else {
+    // Two-finger scroll → pan
+    panX -= e.deltaX;
+    panY -= e.deltaY;
+    applyTransform();
+  }
+}, { passive: false });
+
+// ── Drag to pan ────────────────────────────────────────
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let panStartX = 0;
+let panStartY = 0;
+
+treeContainer.addEventListener('pointerdown', e => {
+  // Ignore if clicking on a leaf node (for proof generation)
+  if (e.target.closest('g[data-level="0"]')) return;
+  isDragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  panStartX = panX;
+  panStartY = panY;
+  treeContainer.classList.add('dragging');
+  treeContainer.setPointerCapture(e.pointerId);
+});
+
+treeContainer.addEventListener('pointermove', e => {
+  if (!isDragging) return;
+  panX = panStartX + (e.clientX - dragStartX);
+  panY = panStartY + (e.clientY - dragStartY);
+  applyTransform();
+});
+
+treeContainer.addEventListener('pointerup', e => {
+  if (!isDragging) return;
+  isDragging = false;
+  treeContainer.classList.remove('dragging');
+  treeContainer.releasePointerCapture(e.pointerId);
+});
+
+treeContainer.addEventListener('pointercancel', e => {
+  if (!isDragging) return;
+  isDragging = false;
+  treeContainer.classList.remove('dragging');
+});
+
+const NODE_W = 62;
+const NODE_H = 30;
+const LEVEL_GAP = 52;
+const NODE_GAP = 8;
+const PAD_X = 60;
+const PAD_Y = 32;
+const MAX_RENDER_LEAVES = 128;
+
+function resetTree() {
+  tree = new TreeClasses[currentN]();
+  insertCounter = 0;
+  proofLeafIndex = null;
+  proofPanel.classList.remove('open');
+  zoomLevel = 1;
+  panX = 0;
+  panY = 0;
+  applyTransform();
+  updateStats();
+  renderTree();
+}
+
+function updateStats() {
+  const size = tree ? Number(tree.size()) : 0;
+  const depth = tree ? tree.depth() : 0;
+  statSize.textContent = size;
+  statDepth.textContent = depth;
+  const r = tree ? tree.root() : null;
+  rootHash.textContent = r ? r.slice(0, 16) + '...' : '(empty)';
+}
+
+// N selector
+document.getElementById('n-selector').addEventListener('click', e => {
+  const btn = e.target.closest('[data-n]');
+  if (!btn) return;
+  document.querySelectorAll('#n-selector .btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentN = parseInt(btn.dataset.n);
+  resetTree();
+});
+
+// Actions
+document.getElementById('btn-insert').addEventListener('click', () => doInsert());
+document.getElementById('btn-batch').addEventListener('click', () => {
+  const count = Math.max(1, Math.min(256, parseInt(batchInput.value) || 10));
+  doBatch(count);
+});
+document.getElementById('btn-clear').addEventListener('click', () => resetTree());
+
+// Keyboard
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); doInsert(); }
+  if (e.key === 'b') {
+    const count = Math.max(1, Math.min(256, parseInt(batchInput.value) || 10));
+    doBatch(count);
+  }
+  if (e.key === 'c') resetTree();
+  if (e.key === '=' || e.key === '+') setZoom(zoomLevel + ZOOM_STEP);
+  if (e.key === '-') setZoom(zoomLevel - ZOOM_STEP);
+  if (e.key === '0') zoomToFit();
+});
+
+function doInsert() {
+  if (!tree) return;
+  if (Number(tree.size()) >= MAX_RENDER_LEAVES) {
+    hintText.textContent = `Max ${MAX_RENDER_LEAVES} leaves for visualization`;
+    return;
+  }
+  const leafData = new TextEncoder().encode(`leaf-${insertCounter++}`);
+  try {
+    const result = tree.insert(leafData);
+    updateStats();
+    renderTree(result.touched);
+  } catch (e) {
+    hintText.textContent = `Error: ${e.message}`;
+  }
+}
+
+function doBatch(count) {
+  if (!tree) return;
+  const size = Number(tree.size());
+  const remaining = MAX_RENDER_LEAVES - size;
+  if (remaining <= 0) {
+    hintText.textContent = `Max ${MAX_RENDER_LEAVES} leaves for visualization`;
+    return;
+  }
+  const actual = Math.min(count, remaining);
+  if (actual <= 0) return;
+  const start = insertCounter;
+  insertCounter += actual;
+  try {
+    tree.insert_many(actual, start);
+    updateStats();
+    renderTree();
+  } catch (e) {
+    hintText.textContent = `Error: ${e.message}`;
+  }
+}
+
+// ── Rendering ──────────────────────────────────────────
+function renderTree(touchedPairs) {
+  if (!tree || Number(tree.size()) === 0) {
+    svg.style.display = 'none';
+    emptyState.style.display = '';
+    return;
+  }
+  emptyState.style.display = 'none';
+  svg.style.display = 'block';
+
+  const data = tree.export_tree();
+  const depth = data.depth;
+  const levels = data.levels;
+
+  const touchedSet = new Set();
+  if (touchedPairs) {
+    for (const [l, idx] of touchedPairs) touchedSet.add(`${l}-${idx}`);
+  }
+
+  const nodePositions = [];
+  let maxWidth = 0;
+
+  for (let level = 0; level <= depth; level++) {
+    const count = levels[level].nodes.length;
+    const totalW = count * NODE_W + (count - 1) * NODE_GAP;
+    if (totalW > maxWidth) maxWidth = totalW;
+  }
+
+  for (let level = 0; level <= depth; level++) {
+    const displayLevel = depth - level;
+    const count = levels[level].nodes.length;
+    const totalW = count * NODE_W + (count - 1) * NODE_GAP;
+    const startX = PAD_X + (maxWidth - totalW) / 2;
+    const y = PAD_Y + displayLevel * LEVEL_GAP;
+
+    nodePositions[level] = [];
+    for (let i = 0; i < count; i++) {
+      nodePositions[level][i] = {
+        x: startX + i * (NODE_W + NODE_GAP),
+        y,
+        hash: levels[level].nodes[i],
+      };
+    }
+  }
+
+  const svgWidth = maxWidth + PAD_X * 2;
+  const svgHeight = (depth + 1) * LEVEL_GAP + PAD_Y * 2;
+  svg.setAttribute('width', svgWidth);
+  svg.setAttribute('height', svgHeight);
+  svg.setAttribute('viewBox', `0 0 ${svgWidth} ${svgHeight}`);
+
+  let html = '';
+
+  // Edges
+  for (let level = 0; level < depth; level++) {
+    const parentNodes = levels[level + 1].nodes;
+    const childNodes = levels[level].nodes;
+
+    for (let pi = 0; pi < parentNodes.length; pi++) {
+      const groupStart = pi * currentN;
+      const groupEnd = Math.min(groupStart + currentN, childNodes.length);
+      const pp = nodePositions[level + 1][pi];
+
+      for (let ci = groupStart; ci < groupEnd; ci++) {
+        const cp = nodePositions[level][ci];
+        const isLifted = (groupEnd - groupStart) === 1;
+        const isHL = proofLeafIndex !== null &&
+          proofPathNodes.has(`${level}-${ci}`) &&
+          proofPathNodes.has(`${level + 1}-${pi}`);
+
+        const x1 = pp.x + NODE_W / 2, y1 = pp.y + NODE_H;
+        const x2 = cp.x + NODE_W / 2, y2 = cp.y;
+        const midY = (y1 + y2) / 2;
+
+        let cls = 'edge';
+        if (isLifted) cls += ' edge-lifted';
+        if (isHL) cls += ' edge-highlighted';
+
+        html += `<path class="${cls}" d="M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}"/>`;
+      }
+    }
+  }
+
+  // Group backgrounds (N > 2)
+  if (currentN > 2) {
+    for (let level = 0; level < depth; level++) {
+      const cnt = levels[level].nodes.length;
+      const numGroups = Math.ceil(cnt / currentN);
+      for (let g = 0; g < numGroups; g++) {
+        const gs = g * currentN;
+        const ge = Math.min(gs + currentN, cnt) - 1;
+        if (gs === ge) continue;
+        const p1 = nodePositions[level][gs];
+        const p2 = nodePositions[level][ge];
+        html += `<rect x="${p1.x - 3}" y="${p1.y - 3}" width="${p2.x + NODE_W - p1.x + 6}" height="${NODE_H + 6}" rx="10" ry="10" fill="rgba(144,209,202,0.08)" stroke="rgba(18,153,144,0.12)" stroke-width="1"/>`;
+      }
+    }
+  }
+
+  // Nodes
+  for (let level = 0; level <= depth; level++) {
+    const nodes = levels[level].nodes;
+    const firstPos = nodePositions[level][0];
+    if (firstPos) {
+      html += `<text class="node-level-label" x="${PAD_X - 10}" y="${firstPos.y + NODE_H / 2}">L${level}</text>`;
+    }
+
+    for (let i = 0; i < nodes.length; i++) {
+      const pos = nodePositions[level][i];
+      const key = `${level}-${i}`;
+      const isTouched = touchedSet.has(key);
+      const isLeaf = level === 0;
+
+      let gc = '';
+      if (proofLeafIndex !== null) {
+        if (proofPathNodes.has(key)) gc = 'node-highlighted';
+        else if (proofSiblingNodes.has(key)) gc = 'sibling-highlighted';
+      }
+
+      const ac = isTouched ? 'node-pulse' : '';
+      const ap = isTouched && isLeaf ? 'node-appear' : '';
+
+      html += `<g class="${gc} ${ac} ${ap}" data-level="${level}" data-index="${i}" style="${isTouched ? `animation-delay:${level * 50}ms` : ''}">`;
+      html += `<rect class="node-rect" x="${pos.x}" y="${pos.y}" width="${NODE_W}" height="${NODE_H}" rx="6" ry="6"/>`;
+      html += `<text class="node-text" x="${pos.x + NODE_W / 2}" y="${pos.y + NODE_H / 2}">${pos.hash}</text>`;
+      html += `</g>`;
+    }
+  }
+
+  svg.innerHTML = html;
+
+  // Leaf click handlers
+  svg.querySelectorAll('g[data-level="0"]').forEach(g => {
+    g.style.cursor = 'pointer';
+    g.addEventListener('click', () => showProof(parseInt(g.dataset.index)));
+  });
+
+  // Auto-fit if the tree overflows the viewport at current zoom
+  const scaledW = parseFloat(svg.getAttribute('width')) * zoomLevel;
+  const scaledH = parseFloat(svg.getAttribute('height')) * zoomLevel;
+  if (scaledW > treeContainer.clientWidth || scaledH > treeContainer.clientHeight) {
+    zoomToFit();
+  }
+}
+
+// ── Proof ──────────────────────────────────────────────
+let proofData = null;
+let proofPathNodes = new Set();
+let proofSiblingNodes = new Set();
+
+function showProof(leafIndex) {
+  if (!tree) return;
+  try {
+    proofData = tree.generate_proof(BigInt(leafIndex));
+    proofLeafIndex = leafIndex;
+    proofPathNodes.clear();
+    proofSiblingNodes.clear();
+
+    let idx = leafIndex;
+    const treeData = tree.export_tree();
+    for (let level = 0; level < proofData.levels.length; level++) {
+      proofPathNodes.add(`${level}-${idx}`);
+      const groupStart = idx - (idx % currentN);
+      const groupEnd = Math.min(groupStart + currentN, treeData.levels[level].nodes.length);
+      for (let si = groupStart; si < groupEnd; si++) {
+        if (si !== idx) proofSiblingNodes.add(`${level}-${si}`);
+      }
+      idx = Math.floor(idx / currentN);
+    }
+    proofPathNodes.add(`${proofData.levels.length}-${idx}`);
+
+    proofLeafEl.textContent = leafIndex;
+    let levelsHtml = '';
+    for (let i = 0; i < proofData.levels.length; i++) {
+      const pl = proofData.levels[i];
+      if (pl.sibling_count === 0) {
+        levelsHtml += `<div class="proof-level"><span class="level-num">L${i}</span><span class="lifted">lifted (sole child)</span></div>`;
+      } else {
+        const sibs = pl.siblings.map(s => `<span class="sib-hash">${s}</span>`).join('');
+        levelsHtml += `<div class="proof-level"><span class="level-num">L${i}</span><span class="position">pos=${pl.position}</span><div class="siblings">${sibs}</div></div>`;
+      }
+    }
+    proofLevelsEl.innerHTML = levelsHtml;
+    proofPanel.classList.add('open');
+    hintText.textContent = `Showing proof for leaf #${leafIndex}`;
+    renderTree();
+
+    // Animate proof path
+    let delay = 0;
+    proofPathNodes.forEach(key => {
+      const [level, index] = key.split('-').map(Number);
+      const g = svg.querySelector(`g[data-level="${level}"][data-index="${index}"]`);
+      if (g) {
+        setTimeout(() => {
+          g.classList.add('node-pulse');
+          setTimeout(() => g.classList.remove('node-pulse'), 250);
+        }, delay);
+        delay += 80;
+      }
+    });
+  } catch (e) {
+    hintText.textContent = `Proof error: ${e.message}`;
+  }
+}
+
+resetTree();
+</script>
+</body>
+</html>

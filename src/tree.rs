@@ -566,6 +566,25 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
     pub fn depth(&self) -> usize {
         self.depth
     }
+
+    /// Number of nodes at the given level.
+    pub fn level_len(&self, level: usize) -> usize {
+        if level > self.depth {
+            return 0;
+        }
+        self.levels[level].len()
+    }
+
+    /// Retrieve the hash of a specific node by level and index.
+    pub fn get_node(&self, level: usize, index: usize) -> Result<Hash, TreeError> {
+        if level > self.depth {
+            return Err(TreeError::IndexOutOfRange {
+                index: index as u64,
+                size: 0,
+            });
+        }
+        self.levels[level].get(index)
+    }
 }
 
 /// Mutable tree state.

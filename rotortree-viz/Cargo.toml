@@ -1,0 +1,15 @@
+[package]
+name = "rotortree-viz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rotortree = { path = "..", features = ["blake3"] }
+blake3 = { version = "1", default-features = false }
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde-wasm-bindgen = "0.6"

@@ -31,13 +31,31 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://drager.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Build rotortree-viz
+        run: wasm-pack build --target web --out-dir www/pkg
+        working-directory: rotortree-viz
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site/benchmarks _site/viz
+          cp assets/benchmarks/* _site/benchmarks/
+          cp -r rotortree-viz/www/* _site/viz/
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Upload entire repository
-          path: 'assets/benchmarks/'
+          path: '_site'
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

@@ -458,7 +458,13 @@ def generate_html(
     parts.append("</head>")
     parts.append("<body>")
 
-    parts.append("<h1>rotortree benchmarks</h1>")
+    parts.append(
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
+        "<h1>rotortree benchmarks</h1>"
+        '<a href="../viz/" style="font-size:12px;color:#096B68;text-decoration:none;'
+        'border:1px solid #096B68;padding:4px 10px;border-radius:4px">viz &rarr;</a>'
+        "</div>"
+    )
     meta_items = []
     if "timestamp" in meta:
         meta_items.append(meta["timestamp"])
