@@ -257,7 +257,7 @@ impl ChunkedLevel {
         Ok(())
     }
 
-    /// Caller must ensure `index < self.len` 
+    /// Caller must ensure `index < self.len`
     #[inline(always)]
     fn set_preallocated(&mut self, index: usize, value: Hash) {
         debug_assert!(
