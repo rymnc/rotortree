@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>rotortree benchmarks</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -77,9 +78,13 @@ details[open] > summary::before {
     opacity: 0.6;
     margin-left: 6px;
 }
+.table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 8px 0 12px 64px;
+}
 table {
     border-collapse: collapse;
-    margin: 8px 0 12px 64px;
     font-size: 12px;
 }
 th, td {
@@ -103,6 +108,17 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
     margin-top: 1px;
 }
 .count-label { font-weight: 600; }
+@media (max-width: 768px) {
+    body { padding: 16px 10px; font-size: 12px; }
+    h1 { font-size: 18px; }
+    .level-2 > summary { padding-left: 16px; }
+    .level-3 > summary { padding-left: 28px; }
+    .level-2 > .content { padding-left: 4px; }
+    .level-3 > .content { padding-left: 8px; }
+    .table-wrap { margin: 8px 0 12px 0; }
+    table { font-size: 11px; }
+    th, td { padding: 4px 8px; }
+}
 </style>
 </head>
 <body>
@@ -120,7 +136,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -146,13 +162,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>50.25 ms<span class="tp">1.989 Mitem/s</span></td>
 <td>50.32 ms<span class="tp">1.987 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -178,13 +194,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>56.07 ms<span class="tp">1.783 Mitem/s</span></td>
 <td>56.14 ms<span class="tp">1.781 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -210,13 +226,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>68.95 ms<span class="tp">1.45 Mitem/s</span></td>
 <td>68.95 ms<span class="tp">1.45 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -242,7 +258,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>90.58 ms<span class="tp">1.103 Mitem/s</span></td>
 <td>90.68 ms<span class="tp">1.102 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -253,7 +269,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -286,13 +302,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>66.61 ms<span class="tp">15.01 Mitem/s</span></td>
 <td>66.47 ms<span class="tp">15.04 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -325,13 +341,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>39.13 ms<span class="tp">25.55 Mitem/s</span></td>
 <td>39.16 ms<span class="tp">25.53 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -364,13 +380,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>31.82 ms<span class="tp">31.41 Mitem/s</span></td>
 <td>31.87 ms<span class="tp">31.36 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -403,7 +419,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>29.08 ms<span class="tp">34.38 Mitem/s</span></td>
 <td>29.03 ms<span class="tp">34.44 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -414,7 +430,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -440,13 +456,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>69.53 ms<span class="tp">14.38 Mitem/s</span></td>
 <td>69.7 ms<span class="tp">14.34 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -472,13 +488,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>45.06 ms<span class="tp">22.19 Mitem/s</span></td>
 <td>45.09 ms<span class="tp">22.17 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -504,13 +520,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>39.73 ms<span class="tp">25.16 Mitem/s</span></td>
 <td>39.74 ms<span class="tp">25.15 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -536,7 +552,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>39.99 ms<span class="tp">25 Mitem/s</span></td>
 <td>39.94 ms<span class="tp">25.03 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -547,7 +563,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -573,13 +589,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>65.54 ms<span class="tp">15.25 Mitem/s</span></td>
 <td>65.57 ms<span class="tp">15.24 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -605,13 +621,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>39.11 ms<span class="tp">25.56 Mitem/s</span></td>
 <td>39.1 ms<span class="tp">25.57 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -637,13 +653,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>32.69 ms<span class="tp">30.59 Mitem/s</span></td>
 <td>32.62 ms<span class="tp">30.65 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -669,7 +685,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>30.04 ms<span class="tp">33.28 Mitem/s</span></td>
 <td>30.03 ms<span class="tp">33.29 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -680,7 +696,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -706,13 +722,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>32.15 ms<span class="tp">15.54 Mitem/s</span></td>
 <td>32.27 ms<span class="tp">15.49 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -738,13 +754,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>18.96 ms<span class="tp">26.35 Mitem/s</span></td>
 <td>19.09 ms<span class="tp">26.17 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -770,13 +786,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>15.71 ms<span class="tp">31.8 Mitem/s</span></td>
 <td>15.65 ms<span class="tp">31.94 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -802,7 +818,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>14.39 ms<span class="tp">34.74 Mitem/s</span></td>
 <td>14.37 ms<span class="tp">34.78 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -813,7 +829,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -846,13 +862,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>179.4 ns</td>
 <td>176.3 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -885,13 +901,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>246.5 ns</td>
 <td>237.3 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -924,13 +940,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>432 ns</td>
 <td>419.5 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -963,7 +979,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>744.6 ns</td>
 <td>803.4 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -974,7 +990,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1007,13 +1023,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.135 µs</td>
 <td>1.149 µs</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1046,13 +1062,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.062 µs</td>
 <td>1.069 µs</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1085,13 +1101,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.322 µs</td>
 <td>1.323 µs</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1124,7 +1140,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.801 µs</td>
 <td>1.799 µs</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -1140,7 +1156,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1173,13 +1189,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>17.26 ms<span class="tp">57.93 Mitem/s</span></td>
 <td>17.41 ms<span class="tp">57.43 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1212,13 +1228,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>9.557 ms<span class="tp">104.6 Mitem/s</span></td>
 <td>9.612 ms<span class="tp">104 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1251,13 +1267,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>6.759 ms<span class="tp">147.9 Mitem/s</span></td>
 <td>6.791 ms<span class="tp">147.2 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1290,7 +1306,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>5.82 ms<span class="tp">171.8 Mitem/s</span></td>
 <td>5.839 ms<span class="tp">171.2 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -1301,7 +1317,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1327,13 +1343,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>71.83 ms<span class="tp">13.92 Mitem/s</span></td>
 <td>72.31 ms<span class="tp">13.82 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1359,13 +1375,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>46.86 ms<span class="tp">21.33 Mitem/s</span></td>
 <td>46.88 ms<span class="tp">21.32 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1391,13 +1407,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>40.73 ms<span class="tp">24.54 Mitem/s</span></td>
 <td>40.76 ms<span class="tp">24.53 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1423,7 +1439,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>41.43 ms<span class="tp">24.13 Mitem/s</span></td>
 <td>42.35 ms<span class="tp">23.6 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -1434,7 +1450,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1460,13 +1476,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>67.93 ms<span class="tp">14.72 Mitem/s</span></td>
 <td>68.4 ms<span class="tp">14.61 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1492,13 +1508,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>40.32 ms<span class="tp">24.79 Mitem/s</span></td>
 <td>40.45 ms<span class="tp">24.71 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1524,13 +1540,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>33.36 ms<span class="tp">29.97 Mitem/s</span></td>
 <td>33.44 ms<span class="tp">29.89 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1556,7 +1572,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>31.1 ms<span class="tp">32.14 Mitem/s</span></td>
 <td>31.21 ms<span class="tp">32.04 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -1567,7 +1583,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1593,13 +1609,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>9.291 ms<span class="tp">53.81 Mitem/s</span></td>
 <td>9.311 ms<span class="tp">53.69 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1625,13 +1641,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>4.714 ms<span class="tp">106 Mitem/s</span></td>
 <td>4.737 ms<span class="tp">105.5 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1657,13 +1673,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>3.614 ms<span class="tp">138.3 Mitem/s</span></td>
 <td>3.628 ms<span class="tp">137.7 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1689,7 +1705,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>2.992 ms<span class="tp">167.1 Mitem/s</span></td>
 <td>3.001 ms<span class="tp">166.5 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -1705,7 +1721,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1731,13 +1747,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.27 s<span class="tp">78.7 Kitem/s</span></td>
 <td>1.288 s<span class="tp">77.58 Kitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1763,13 +1779,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.135 s<span class="tp">88.05 Kitem/s</span></td>
 <td>1.137 s<span class="tp">87.95 Kitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1795,13 +1811,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.047 s<span class="tp">95.44 Kitem/s</span></td>
 <td>1.049 s<span class="tp">95.26 Kitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1827,7 +1843,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.032 s<span class="tp">96.87 Kitem/s</span></td>
 <td>1.032 s<span class="tp">96.84 Kitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -1838,7 +1854,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1871,13 +1887,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>68.88 ms<span class="tp">14.51 Mitem/s</span></td>
 <td>68.86 ms<span class="tp">14.52 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1910,13 +1926,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>39.84 ms<span class="tp">25.09 Mitem/s</span></td>
 <td>39.9 ms<span class="tp">25.06 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1949,13 +1965,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>32.83 ms<span class="tp">30.45 Mitem/s</span></td>
 <td>32.83 ms<span class="tp">30.45 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -1988,7 +2004,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>30.08 ms<span class="tp">33.23 Mitem/s</span></td>
 <td>30.05 ms<span class="tp">33.26 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -1999,7 +2015,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2025,13 +2041,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>33.98 ms<span class="tp">14.71 Mitem/s</span></td>
 <td>34.04 ms<span class="tp">14.68 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2057,13 +2073,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>19.88 ms<span class="tp">25.14 Mitem/s</span></td>
 <td>19.93 ms<span class="tp">25.07 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2089,13 +2105,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>16.47 ms<span class="tp">30.35 Mitem/s</span></td>
 <td>16.44 ms<span class="tp">30.41 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2121,7 +2137,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>15.02 ms<span class="tp">33.27 Mitem/s</span></td>
 <td>15 ms<span class="tp">33.32 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -2132,7 +2148,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2165,13 +2181,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>172.9 ns</td>
 <td>173.6 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2204,13 +2220,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>243.2 ns</td>
 <td>243.3 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2243,13 +2259,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>455.4 ns</td>
 <td>455.8 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2282,7 +2298,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>786.1 ns</td>
 <td>786.2 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -2293,7 +2309,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2326,13 +2342,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.135 µs</td>
 <td>1.137 µs</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2365,13 +2381,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.062 µs</td>
 <td>1.063 µs</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2404,13 +2420,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.333 µs</td>
 <td>1.35 µs</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2443,7 +2459,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>2.01 µs</td>
 <td>2.006 µs</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -2454,7 +2470,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2487,13 +2503,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>3.706 ns</td>
 <td>3.729 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2526,13 +2542,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>3.706 ns</td>
 <td>3.735 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2565,13 +2581,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>3.706 ns</td>
 <td>3.715 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2604,7 +2620,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>3.726 ns</td>
 <td>3.746 ns</td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -2615,7 +2631,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(2)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2634,13 +2650,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>6.969 ms<span class="tp">14.34 Mitem/s</span></td>
 <td>7.072 ms<span class="tp">14.13 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(2)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2659,13 +2675,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>4.003 ms<span class="tp">24.97 Mitem/s</span></td>
 <td>3.999 ms<span class="tp">25 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(2)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2684,13 +2700,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>3.323 ms<span class="tp">30.09 Mitem/s</span></td>
 <td>3.351 ms<span class="tp">29.83 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(2)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2709,7 +2725,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>3.024 ms<span class="tp">33.05 Mitem/s</span></td>
 <td>3.022 ms<span class="tp">33.08 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -2725,7 +2741,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2758,13 +2774,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>18.38 ms<span class="tp">54.39 Mitem/s</span></td>
 <td>19.02 ms<span class="tp">52.57 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2797,13 +2813,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>10.62 ms<span class="tp">94.14 Mitem/s</span></td>
 <td>10.56 ms<span class="tp">94.64 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2836,13 +2852,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>6.949 ms<span class="tp">143.9 Mitem/s</span></td>
 <td>7.051 ms<span class="tp">141.8 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2875,7 +2891,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>6.032 ms<span class="tp">165.7 Mitem/s</span></td>
 <td>6.06 ms<span class="tp">165 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -2886,7 +2902,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2912,13 +2928,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>9.249 ms<span class="tp">54.05 Mitem/s</span></td>
 <td>9.302 ms<span class="tp">53.75 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2944,13 +2960,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>4.845 ms<span class="tp">103.1 Mitem/s</span></td>
 <td>5.022 ms<span class="tp">99.55 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -2976,13 +2992,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>4.921 ms<span class="tp">101.5 Mitem/s</span></td>
 <td>6.108 ms<span class="tp">81.85 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3008,7 +3024,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>3.755 ms<span class="tp">133.1 Mitem/s</span></td>
 <td>4.084 ms<span class="tp">122.4 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -3019,7 +3035,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(2)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3038,13 +3054,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>2.639 ms<span class="tp">37.87 Mitem/s</span></td>
 <td>2.644 ms<span class="tp">37.81 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(2)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3063,13 +3079,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.358 ms<span class="tp">73.58 Mitem/s</span></td>
 <td>1.367 ms<span class="tp">73.11 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(2)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3088,13 +3104,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.225 ms<span class="tp">81.59 Mitem/s</span></td>
 <td>1.501 ms<span class="tp">66.61 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(2)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3113,7 +3129,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>989.7 µs<span class="tp">101 Mitem/s</span></td>
 <td>992.5 µs<span class="tp">100.7 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -3129,7 +3145,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3155,13 +3171,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.285 s<span class="tp">77.81 Kitem/s</span></td>
 <td>1.284 s<span class="tp">77.87 Kitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3187,13 +3203,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.138 s<span class="tp">87.86 Kitem/s</span></td>
 <td>1.139 s<span class="tp">87.73 Kitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3219,13 +3235,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.094 s<span class="tp">91.38 Kitem/s</span></td>
 <td>1.116 s<span class="tp">89.57 Kitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3251,7 +3267,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.076 s<span class="tp">92.86 Kitem/s</span></td>
 <td>1.079 s<span class="tp">92.63 Kitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -3262,7 +3278,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3295,13 +3311,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>18.46 ms<span class="tp">54.14 Mitem/s</span></td>
 <td>18.91 ms<span class="tp">52.87 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3334,13 +3350,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>11.98 ms<span class="tp">83.44 Mitem/s</span></td>
 <td>12.94 ms<span class="tp">77.27 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3373,13 +3389,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>9.28 ms<span class="tp">107.7 Mitem/s</span></td>
 <td>9.676 ms<span class="tp">103.3 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3412,7 +3428,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>8.834 ms<span class="tp">113.1 Mitem/s</span></td>
 <td>9.158 ms<span class="tp">109.1 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -3423,7 +3439,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3449,13 +3465,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>6.208 ms<span class="tp">16.1 Mitem/s</span></td>
 <td>6.26 ms<span class="tp">15.97 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3481,13 +3497,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>6.826 ms<span class="tp">14.64 Mitem/s</span></td>
 <td>6.706 ms<span class="tp">14.91 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3513,13 +3529,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>7.594 ms<span class="tp">13.16 Mitem/s</span></td>
 <td>7.613 ms<span class="tp">13.13 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3545,7 +3561,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>8.065 ms<span class="tp">12.39 Mitem/s</span></td>
 <td>8.958 ms<span class="tp">11.16 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -3556,7 +3572,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3582,13 +3598,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>2.487 ms<span class="tp">40.2 Mitem/s</span></td>
 <td>2.498 ms<span class="tp">40.02 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3614,13 +3630,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.454 ms<span class="tp">68.77 Mitem/s</span></td>
 <td>1.466 ms<span class="tp">68.17 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3646,13 +3662,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.174 ms<span class="tp">85.11 Mitem/s</span></td>
 <td>1.183 ms<span class="tp">84.52 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(3)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3678,7 +3694,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>1.069 ms<span class="tp">93.5 Mitem/s</span></td>
 <td>1.082 ms<span class="tp">92.38 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -3689,7 +3705,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3722,13 +3738,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>16.67 ms<span class="tp">5.996 Mitem/s</span></td>
 <td>17.48 ms<span class="tp">5.718 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3761,13 +3777,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>16.98 ms<span class="tp">5.887 Mitem/s</span></td>
 <td>17.05 ms<span class="tp">5.862 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3800,13 +3816,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>15.17 ms<span class="tp">6.588 Mitem/s</span></td>
 <td>15.06 ms<span class="tp">6.635 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(4)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3839,7 +3855,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>15.24 ms<span class="tp">6.559 Mitem/s</span></td>
 <td>15.19 ms<span class="tp">6.58 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>
@@ -3850,7 +3866,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <details class="level-3" open>
 <summary>n=2<span class="bench-count">(8)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3911,13 +3927,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>52.15 ms<span class="tp">19.17 Mitem/s</span></td>
 <td>52.32 ms<span class="tp">19.11 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=4<span class="bench-count">(8)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -3978,13 +3994,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>34.05 ms<span class="tp">29.36 Mitem/s</span></td>
 <td>34.25 ms<span class="tp">29.18 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=8<span class="bench-count">(8)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -4045,13 +4061,13 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>27.23 ms<span class="tp">36.71 Mitem/s</span></td>
 <td>27.21 ms<span class="tp">36.74 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 <details class="level-3" open>
 <summary>n=16<span class="bench-count">(8)</span></summary>
 <div class="content">
-<table>
+<div class="table-wrap"><table>
 <thead><tr>
 <th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>
 </tr></thead>
@@ -4112,7 +4128,7 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
 <td>34.06 ms<span class="tp">29.35 Mitem/s</span></td>
 <td>34.1 ms<span class="tp">29.32 Mitem/s</span></td>
 </tr>
-</tbody></table>
+</tbody></table></div>
 </div>
 </details>
 </div>

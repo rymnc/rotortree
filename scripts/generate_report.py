@@ -369,9 +369,13 @@ details[open] > summary::before {
     opacity: 0.6;
     margin-left: 6px;
 }
+.table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin: 8px 0 12px 64px;
+}
 table {
     border-collapse: collapse;
-    margin: 8px 0 12px 64px;
     font-size: 12px;
 }
 th, td {
@@ -395,6 +399,17 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
     margin-top: 1px;
 }
 .count-label { font-weight: 600; }
+@media (max-width: 768px) {
+    body { padding: 16px 10px; font-size: 12px; }
+    h1 { font-size: 18px; }
+    .level-2 > summary { padding-left: 16px; }
+    .level-3 > summary { padding-left: 28px; }
+    .level-2 > .content { padding-left: 4px; }
+    .level-3 > .content { padding-left: 8px; }
+    .table-wrap { margin: 8px 0 12px 0; }
+    table { font-size: 11px; }
+    th, td { padding: 4px 8px; }
+}
 """
 
 
@@ -412,7 +427,7 @@ def render_cell(time_val: str, tp_val: str) -> str:
 
 def render_table(rows: list[BenchRow]) -> str:
     """Render the innermost data table."""
-    lines = ["<table>", "<thead><tr>"]
+    lines = ['<div class="table-wrap">', "<table>", "<thead><tr>"]
     lines.append(
         "<th>count</th><th>fastest</th><th>slowest</th><th>median</th><th>mean</th>"
     )
@@ -428,7 +443,7 @@ def render_table(rows: list[BenchRow]) -> str:
         lines.append(f"<td>{render_cell(row.mean, row.tp_mean)}</td>")
         lines.append("</tr>")
 
-    lines.append("</tbody></table>")
+    lines.append("</tbody></table></div>")
     return "\n".join(lines)
 
 
@@ -447,6 +462,7 @@ def generate_html(
     parts.append('<html lang="en">')
     parts.append("<head>")
     parts.append('<meta charset="utf-8">')
+    parts.append('<meta name="viewport" content="width=device-width, initial-scale=1">')
     parts.append("<title>rotortree benchmarks</title>")
     parts.append('<link rel="preconnect" href="https://fonts.googleapis.com">')
     parts.append('<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>')
