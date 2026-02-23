@@ -49,6 +49,10 @@ class BenchRow:
     tp_mean: str
     samples: int
     iters: int
+    diff_fastest: float | None = None
+    diff_slowest: float | None = None
+    diff_median: float | None = None
+    diff_mean: float | None = None
 
 
 # ── Constants ───────────────────────────────────────────────────────────────
@@ -141,6 +145,92 @@ RE_PARENT = re.compile(
 RE_BENCH_NAME = re.compile(r"^(.+?)_n(\d+)_(\d+)(?:_every(\d+))?$")
 
 
+# ── Time parsing ───────────────────────────────────────────────────────────
+
+TIME_UNITS = {"ns": 1.0, "µs": 1e3, "us": 1e3, "ms": 1e6, "s": 1e9}
+RE_TIME = re.compile(r"^([\d.,]+)\s+(\S+)$")
+
+
+def parse_time_to_ns(s: str) -> float | None:
+    """Parse a timing string like '109.1 ns' or '2.735 ms' into nanoseconds."""
+    m = RE_TIME.match(s.strip())
+    if not m:
+        return None
+    value_str, unit = m.groups()
+    multiplier = TIME_UNITS.get(unit)
+    if multiplier is None:
+        return None
+    return float(value_str.replace(",", "")) * multiplier
+
+
+def compute_diff_pct(current: str, previous: float | None) -> float | None:
+    """Compute % change from previous to current. Positive = regression (slower)."""
+    if previous is None:
+        return None
+    cur_ns = parse_time_to_ns(current)
+    if cur_ns is None or previous == 0:
+        return None
+    return ((cur_ns - previous) / previous) * 100.0
+
+
+def find_previous_run(input_dir: Path) -> Path | None:
+    """Find the previous benchmark run directory (sibling sorted by name)."""
+    parent = input_dir.parent
+    if not parent.is_dir():
+        return None
+    current_name = input_dir.resolve().name
+    siblings = sorted(
+        d.name for d in parent.iterdir()
+        if d.is_dir() and not d.is_symlink() and d.name != "latest"
+    )
+    try:
+        idx = siblings.index(current_name)
+    except ValueError:
+        return None
+    if idx == 0:
+        return None
+    prev = parent / siblings[idx - 1]
+    if not list(prev.glob("tree_bench*.txt")):
+        return None
+    return prev
+
+
+@dataclass
+class PrevEntry:
+    fastest_ns: float | None
+    slowest_ns: float | None
+    median_ns: float | None
+    mean_ns: float | None
+
+
+def build_previous_lookup(
+    all_results: list[dict],
+) -> dict[tuple[str, str], PrevEntry]:
+    """Build a flat lookup: (binary, entry_name) -> PrevEntry from parsed results."""
+    lookup: dict[tuple[str, str], PrevEntry] = {}
+    for result in all_results:
+        binary = result["binary"]
+        for entry in result["entries"]:
+            lookup[(binary, entry.name)] = PrevEntry(
+                fastest_ns=parse_time_to_ns(entry.fastest),
+                slowest_ns=parse_time_to_ns(entry.slowest),
+                median_ns=parse_time_to_ns(entry.median),
+                mean_ns=parse_time_to_ns(entry.mean),
+            )
+    return lookup
+
+
+def load_previous_results(prev_dir: Path) -> list[dict]:
+    """Load and parse benchmark results from a previous run directory."""
+    results = []
+    for txt_file in sorted(prev_dir.glob("tree_bench*.txt")):
+        text = txt_file.read_text()
+        result = parse_divan_output(text, txt_file.stem)
+        if result and result["entries"]:
+            results.append(result)
+    return results
+
+
 # ── Parsing ─────────────────────────────────────────────────────────────────
 
 
@@ -231,6 +321,7 @@ def format_count(n: int) -> str:
 
 def build_hierarchy(
     all_results: list[dict],
+    prev_lookup: dict[tuple[str, str], PrevEntry] | None = None,
 ) -> dict[str, dict[str, dict[str, list[BenchRow]]]]:
     """Build a nested dict: binary -> operation -> n_key -> [rows]."""
     hierarchy: dict[str, dict[str, dict[str, list[BenchRow]]]] = {}
@@ -253,6 +344,9 @@ def build_hierarchy(
             if "every" in bid.extra:
                 label += f" (every {bid.extra['every']})"
 
+            # Compute diffs against previous run
+            prev = prev_lookup.get((binary, entry.name)) if prev_lookup else None
+
             row = BenchRow(
                 label=label,
                 fastest=entry.fastest,
@@ -265,6 +359,10 @@ def build_hierarchy(
                 tp_mean=entry.tp_mean,
                 samples=entry.samples,
                 iters=entry.iters,
+                diff_fastest=compute_diff_pct(entry.fastest, prev.fastest_ns) if prev else None,
+                diff_slowest=compute_diff_pct(entry.slowest, prev.slowest_ns) if prev else None,
+                diff_median=compute_diff_pct(entry.median, prev.median_ns) if prev else None,
+                diff_mean=compute_diff_pct(entry.mean, prev.mean_ns) if prev else None,
             )
             hierarchy[binary][op][n_key].append(row)
 
@@ -399,6 +497,16 @@ tr:hover td { background: rgba(144, 209, 202, 0.15); }
     margin-top: 1px;
 }
 .count-label { font-weight: 600; }
+.diff-better {
+    color: #1a7a3a;
+    font-size: 10px;
+    font-weight: 600;
+}
+.diff-worse {
+    color: #c0392b;
+    font-size: 10px;
+    font-weight: 600;
+}
 @media (max-width: 768px) {
     body { padding: 16px 10px; font-size: 12px; }
     h1 { font-size: 18px; }
@@ -417,9 +525,31 @@ def _esc(s: str) -> str:
     return html.escape(s, quote=True)
 
 
-def render_cell(time_val: str, tp_val: str) -> str:
-    """Render a table cell with timing and optional throughput."""
-    out = _esc(time_val)
+def render_diff(pct: float | None) -> str:
+    """Render a small colored diff badge, or empty string if no diff."""
+    if pct is None:
+        return ""
+    abs_pct = abs(pct)
+    if abs_pct < 0.5:
+        return ""
+    if pct > 0:
+        # Slower = regression (red)
+        sign = "+"
+        cls = "diff-worse"
+    else:
+        # Faster = improvement (green)
+        sign = ""
+        cls = "diff-better"
+    if abs_pct >= 10:
+        text = f"{sign}{pct:.0f}%"
+    else:
+        text = f"{sign}{pct:.1f}%"
+    return f' <span class="{cls}">{text}</span>'
+
+
+def render_cell(time_val: str, tp_val: str, diff_pct: float | None = None) -> str:
+    """Render a table cell with timing, optional throughput, and optional diff."""
+    out = _esc(time_val) + render_diff(diff_pct)
     if tp_val:
         out += f'<span class="tp">{_esc(tp_val)}</span>'
     return out
@@ -437,10 +567,10 @@ def render_table(rows: list[BenchRow]) -> str:
     for row in rows:
         lines.append("<tr>")
         lines.append(f'<td class="count-label">{_esc(row.label)}</td>')
-        lines.append(f"<td>{render_cell(row.fastest, row.tp_fastest)}</td>")
-        lines.append(f"<td>{render_cell(row.slowest, row.tp_slowest)}</td>")
-        lines.append(f"<td>{render_cell(row.median, row.tp_median)}</td>")
-        lines.append(f"<td>{render_cell(row.mean, row.tp_mean)}</td>")
+        lines.append(f"<td>{render_cell(row.fastest, row.tp_fastest, row.diff_fastest)}</td>")
+        lines.append(f"<td>{render_cell(row.slowest, row.tp_slowest, row.diff_slowest)}</td>")
+        lines.append(f"<td>{render_cell(row.median, row.tp_median, row.diff_median)}</td>")
+        lines.append(f"<td>{render_cell(row.mean, row.tp_mean, row.diff_mean)}</td>")
         lines.append("</tr>")
 
     lines.append("</tbody></table></div>")
@@ -580,6 +710,13 @@ def main():
     parser.add_argument(
         "-o", "--output", help="Output HTML path (default: <input_dir>/report.html)"
     )
+    parser.add_argument(
+        "--previous",
+        help="Previous run directory for diff %% (auto-detected if omitted)",
+    )
+    parser.add_argument(
+        "--no-diff", action="store_true", help="Disable diff comparison"
+    )
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -602,7 +739,17 @@ def main():
         print("Error: no benchmark results found", file=sys.stderr)
         sys.exit(1)
 
-    hierarchy = build_hierarchy(all_results)
+    # Load previous run for diff comparison
+    prev_lookup = None
+    if not args.no_diff:
+        prev_dir = Path(args.previous) if args.previous else find_previous_run(input_dir)
+        if prev_dir:
+            prev_results = load_previous_results(prev_dir)
+            if prev_results:
+                prev_lookup = build_previous_lookup(prev_results)
+                print(f"Comparing against previous run: {prev_dir.name}", file=sys.stderr)
+
+    hierarchy = build_hierarchy(all_results, prev_lookup)
     html_content = generate_html(hierarchy, meta)
 
     output_path = Path(args.output) if args.output else input_dir / "report.html"
