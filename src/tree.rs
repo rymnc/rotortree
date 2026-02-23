@@ -217,7 +217,7 @@ impl ChunkedLevel {
 
     /// Copy a contiguous group of hashes into `out`.
     /// Fast path when the group falls within a single chunk or tail.
-    #[inline]
+    #[inline(always)]
     fn get_group(&self, start: usize, count: usize, out: &mut [Hash]) {
         let chunk_idx = start / CHUNK_SIZE;
         let offset = start % CHUNK_SIZE;
@@ -255,6 +255,29 @@ impl ChunkedLevel {
             self.tail[offset] = value;
         }
         Ok(())
+    }
+
+    /// Caller must ensure `index < self.len` 
+    #[inline(always)]
+    fn set_preallocated(&mut self, index: usize, value: Hash) {
+        debug_assert!(
+            index < self.len,
+            "set_preallocated: index {index} >= len {}",
+            self.len
+        );
+        let chunk_idx = index / CHUNK_SIZE;
+        let offset = index % CHUNK_SIZE;
+        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
+        if chunk_idx < committed {
+            let seg_idx = chunk_idx / CHUNKS_PER_SEGMENT;
+            let seg_off = chunk_idx % CHUNKS_PER_SEGMENT;
+            Arc::make_mut(&mut self.segments[seg_idx])[seg_off].make_mut()[offset] =
+                value;
+        } else if chunk_idx - committed < self.pending.len() {
+            self.pending[chunk_idx - committed].make_mut()[offset] = value;
+        } else {
+            self.tail[offset] = value;
+        }
     }
 
     /// Append a hash. Promotes the tail when it reaches
@@ -929,7 +952,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
     /// Compute the parent hash for a group at `parent_idx`
     /// within a single level.
-    #[inline]
+    #[inline(always)]
     fn _compute_parent(
         child_level: &ChunkedLevel,
         parent_idx: usize,
@@ -966,7 +989,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
                 Self::_compute_parent(&levels[level], parent_idx, level_len, hasher)?;
             let next_level = level + 1;
             if next_level < levels.len() {
-                levels[next_level].set(parent_idx, parent)?;
+                levels[next_level].set_preallocated(parent_idx, parent);
             }
             if is_root_level {
                 *root = parent;
@@ -1021,6 +1044,8 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
         #[cfg(feature = "parallel")]
         let mut par_buf: Vec<Hash> = Vec::new();
+        #[cfg(feature = "parallel")]
+        let par_threshold = parallel_threshold();
 
         for level in 0..depth {
             let level_len = inner.levels[level].len;
@@ -1030,7 +1055,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
             #[cfg(feature = "parallel")]
             {
                 let work = num_parents - start_parent;
-                if work >= parallel_threshold() {
+                if work >= par_threshold {
                     use rayon::prelude::*;
 
                     let split_at = level + 1;
@@ -1060,7 +1085,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
                     for (i, &parent) in par_buf.iter().enumerate() {
                         let parent_idx = start_parent + i;
                         if split_at < MAX_DEPTH {
-                            parent_level.set(parent_idx, parent)?;
+                            parent_level.set_preallocated(parent_idx, parent);
                         }
                         if is_root_level {
                             root = parent;
