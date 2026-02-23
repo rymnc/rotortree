@@ -14,6 +14,7 @@ impl Blake3Hasher {
 }
 
 impl Hasher for Blake3Hasher {
+    #[inline]
     fn hash_children(&self, children: &[Hash]) -> Hash {
         *::blake3::hash(children.as_flattened()).as_bytes()
     }

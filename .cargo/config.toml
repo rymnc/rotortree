@@ -1,0 +1,5 @@
+[alias]
+tb = "hack nextest run --feature-powerset --release --skip docs --no-run"
+te = "hack nextest run --feature-powerset --release --skip docs"
+cl = "hack clippy --feature-powerset --skip docs"
+ch = "hack check --feature-powerset --skip docs"

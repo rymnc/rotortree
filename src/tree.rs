@@ -53,6 +53,7 @@ impl Chunk {
         Arc::make_mut(&mut self.0)
     }
 
+    #[inline]
     fn new_memory(data: [Hash; CHUNK_SIZE]) -> Self {
         Self(Arc::new(data))
     }
@@ -102,6 +103,7 @@ impl Chunk {
         }
     }
 
+    #[inline]
     fn new_memory(data: [Hash; CHUNK_SIZE]) -> Self {
         Self(ChunkInner::Memory(Arc::new(data)))
     }
@@ -149,6 +151,7 @@ fn ceil_log_n(size: u64, n: usize) -> usize {
 
 /// Convert `u64` to `usize`, returning `CapacityExceeded` on
 /// failure (relevant on 32-bit platforms).
+#[inline]
 fn u64_to_usize(val: u64) -> Result<usize, TreeError> {
     usize::try_from(val).map_err(|_| TreeError::CapacityExceeded)
 }
@@ -182,6 +185,7 @@ impl ChunkedLevel {
     }
 
     /// Total number of committed chunks (segments + pending).
+    #[inline]
     pub(crate) fn chunk_count(&self) -> usize {
         self.segments.len() * CHUNKS_PER_SEGMENT + self.pending.len()
     }
@@ -200,6 +204,7 @@ impl ChunkedLevel {
     }
 
     /// Read a hash at the given index.
+    #[inline]
     fn get(&self, index: usize) -> Result<Hash, TreeError> {
         let chunk_idx = index / CHUNK_SIZE;
         let offset = index % CHUNK_SIZE;
@@ -212,6 +217,7 @@ impl ChunkedLevel {
 
     /// Copy a contiguous group of hashes into `out`.
     /// Fast path when the group falls within a single chunk or tail.
+    #[inline]
     fn get_group(&self, start: usize, count: usize, out: &mut [Hash]) {
         let chunk_idx = start / CHUNK_SIZE;
         let offset = start % CHUNK_SIZE;
@@ -230,6 +236,7 @@ impl ChunkedLevel {
     }
 
     /// Write a hash at the given index
+    #[inline]
     fn set(&mut self, index: usize, value: Hash) -> Result<(), TreeError> {
         while self.len <= index {
             self.push([0u8; 32])?;
@@ -252,6 +259,7 @@ impl ChunkedLevel {
 
     /// Append a hash. Promotes the tail when it reaches
     /// `CHUNK_SIZE`.
+    #[inline]
     fn push(&mut self, value: Hash) -> Result<(), TreeError> {
         self.tail[self.tail_len] = value;
         self.tail_len = self.tail_len.checked_add(1).ok_or(TreeError::MathError)?;
@@ -482,6 +490,7 @@ impl SnapshotLevel {
     };
 
     /// Total number of committed chunks (segments + pending).
+    #[inline]
     fn chunk_count(&self) -> usize {
         self.segments.len() * CHUNKS_PER_SEGMENT + self.pending.len()
     }
@@ -499,6 +508,7 @@ impl SnapshotLevel {
         }
     }
 
+    #[inline]
     pub(crate) fn get(&self, index: usize) -> Result<Hash, TreeError> {
         let chunk_idx = index / CHUNK_SIZE;
         let offset = index % CHUNK_SIZE;
@@ -509,6 +519,7 @@ impl SnapshotLevel {
         }
     }
 
+    #[inline]
     pub(crate) fn get_group(&self, start: usize, count: usize, out: &mut [Hash]) {
         let chunk_idx = start / CHUNK_SIZE;
         let offset = start % CHUNK_SIZE;
@@ -526,6 +537,7 @@ impl SnapshotLevel {
         }
     }
 
+    #[inline]
     pub(crate) fn len(&self) -> usize {
         self.len
     }
@@ -697,6 +709,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
     }
 
     #[cfg(feature = "storage")]
+    #[inline]
     fn _hash_group<H: Hasher>(
         current: &[Hash],
         parent_idx: usize,
@@ -868,6 +881,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         self.snapshot.load_full()
     }
 
+    #[inline]
     pub(crate) fn _insert(
         inner: &mut TreeInner<N, MAX_DEPTH>,
         hasher: &H,
@@ -915,6 +929,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
     /// Compute the parent hash for a group at `parent_idx`
     /// within a single level.
+    #[inline]
     fn _compute_parent(
         child_level: &ChunkedLevel,
         parent_idx: usize,
@@ -934,6 +949,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     }
 
     /// Sequential inner loop for one level of `_insert_many`.
+    #[inline]
     #[allow(clippy::too_many_arguments)]
     fn _insert_many_level_seq(
         levels: &mut [ChunkedLevel],
