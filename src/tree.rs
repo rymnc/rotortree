@@ -745,9 +745,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
         if count == 1 {
             current[start]
         } else {
-            let mut children = [[0u8; 32]; N];
-            children[..count].copy_from_slice(&current[start..end]);
-            hasher.hash_children(&children[..count])
+            hasher.hash_children(&current[start..end])
         }
     }
 
