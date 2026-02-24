@@ -15,10 +15,19 @@
 
   /* ── Upload view ── */
   #upload-view {
+    position: relative;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     height: 100vh; background: linear-gradient(160deg, var(--cream) 0%, rgba(144,209,202,0.12) 100%);
   }
-  #upload-view h1 { font-size: 28px; font-weight: 700; color: var(--dark); letter-spacing: -0.02em; margin-bottom: 6px; }
+  #upload-view .top-bar {
+    position: absolute; top: 0; left: 0; right: 0; padding: 32px 40px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  #upload-view .top-bar h1 { font-size: 22px; font-weight: 700; color: var(--teal); letter-spacing: -0.02em; }
+  #upload-view .top-bar a {
+    font-size: 12px; color: var(--teal); text-decoration: none;
+    border: 1px solid var(--teal); padding: 4px 10px; border-radius: 4px;
+  }
   #upload-view .subtitle { font-size: 13px; color: var(--teal-mid); font-weight: 500; margin-bottom: 32px; }
   .file-slots { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
   .file-slot {
@@ -90,7 +99,7 @@
 
 <!-- ════════ Upload View ════════ -->
 <div id="upload-view">
-  <h1>rotortree benchmarks</h1>
+  <div class="top-bar"><h1>rotortree benchmarks differ</h1><a href="../benchmarks/">benchmarks</a></div>
   <div class="subtitle">upload one or two CSVs to visualize and compare</div>
   <div class="file-slots">
     <div class="file-slot" id="slot-a" onclick="document.getElementById('input-a').click()">
@@ -112,10 +121,11 @@
 <div id="dash-view">
   <div class="dash-header">
     <div>
-      <h1><span>◆</span> rotortree benchmarks</h1>
+      <h1><span>◆</span> rotortree benchmarks differ</h1>
       <div class="meta" id="dash-meta"></div>
     </div>
     <div class="header-btns">
+      <button class="btn-back"><a href="../benchmarks/" style="text-decoration:none;">benchmarks</a></button> 
       <button class="btn-export" onclick="exportPNG()">export png ↓</button>
       <button class="btn-back" onclick="goBack()">← new upload</button>
     </div>
@@ -412,12 +422,12 @@ function exportPNG() {
   ctx.fillText("◆", padPx, titlePx / 2);
   ctx.fillStyle = C.dark;
   const titleX = padPx + ctx.measureText("◆ ").width;
-  ctx.fillText("rotortree benchmarks", titleX, titlePx / 2);
+  ctx.fillText("rotortree benchmarks differ", titleX, titlePx / 2);
 
   // Legend if comparing
   if (dataB && dataB.length > 0) {
     const legendY = titlePx / 2;
-    const afterTitle = titleX + ctx.measureText("rotortree benchmarks").width + 32 * scale;
+    const afterTitle = titleX + ctx.measureText("rotortree benchmarks differ").width + 32 * scale;
     const swatchW = 14 * scale, swatchH = 3 * scale, labelGap = 6 * scale, itemGap = 20 * scale;
     ctx.font = `${10 * scale}px 'JetBrains Mono', monospace`;
 

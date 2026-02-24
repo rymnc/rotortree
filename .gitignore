@@ -4,3 +4,4 @@ profile.json.gz
 .db
 *.csv
 bench_results/
+**/.DS_Store
