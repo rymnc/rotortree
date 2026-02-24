@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>rotortree benchmarks diff viewer</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'JetBrains Mono', monospace; background: #F5EEDD; overflow-x: hidden; }
+  :root {
+    --dark: #1a1a1a; --teal: #096B68; --teal-mid: #129990;
+    --mint: #90D1CA; --cream: #F5EEDD; --cream-dark: #e8dcc8;
+  }
+
+  /* ── Upload view ── */
+  #upload-view {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100vh; background: linear-gradient(160deg, var(--cream) 0%, rgba(144,209,202,0.12) 100%);
+  }
+  #upload-view h1 { font-size: 28px; font-weight: 700; color: var(--dark); letter-spacing: -0.02em; margin-bottom: 6px; }
+  #upload-view .subtitle { font-size: 13px; color: var(--teal-mid); font-weight: 500; margin-bottom: 32px; }
+  .file-slots { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+  .file-slot {
+    width: 260px; padding: 32px 24px; border-radius: 12px; cursor: pointer; text-align: center;
+    border: 2px dashed var(--mint); background: rgba(245,238,221,0.8);
+  }
+  .file-slot.loaded { border-color: var(--teal); background: rgba(9,107,104,0.06); }
+  .file-slot.slot-b { border-color: var(--cream-dark); background: rgba(245,238,221,0.53); }
+  .file-slot.slot-b.loaded { border-color: var(--teal-mid); background: rgba(18,153,144,0.06); }
+  .file-slot .name { font-size: 13px; font-weight: 600; color: var(--dark); margin-bottom: 4px; }
+  .file-slot .info { font-size: 11px; color: var(--teal-mid); }
+  .format-hint {
+    margin-top: 20px; padding: 6px 14px; background: rgba(26,26,26,0.03);
+    border-radius: 6px; font-size: 10px; color: rgba(26,26,26,0.47);
+  }
+  #go-btn {
+    margin-top: 24px; padding: 10px 32px; border-radius: 8px; border: none;
+    background: var(--cream-dark); color: rgba(26,26,26,0.27);
+    font-weight: 700; font-size: 13px; cursor: default;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  #go-btn.active { background: var(--teal); color: var(--cream); cursor: pointer; }
+
+  /* ── Dashboard view ── */
+  #dash-view {
+    display: none; min-height: 100vh; padding: 16px 24px;
+    background: linear-gradient(160deg, var(--cream) 0%, rgba(144,209,202,0.07) 100%);
+  }
+  .dash-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid rgba(144,209,202,0.19);
+  }
+  .dash-header h1 { font-size: 20px; font-weight: 700; color: var(--dark); letter-spacing: -0.02em; }
+  .dash-header h1 span { color: var(--teal); }
+  .dash-header .meta { font-size: 11px; color: var(--teal-mid); margin-top: 3px; font-weight: 500; }
+  .header-btns { display: flex; gap: 8px; }
+  .header-btns button {
+    padding: 6px 14px; border-radius: 6px; font-weight: 600; font-size: 11px;
+    cursor: pointer; font-family: 'JetBrains Mono', monospace;
+  }
+  .btn-export { border: 1px solid var(--teal); background: var(--teal); color: var(--cream); }
+  .btn-back { border: 1px solid var(--mint); background: transparent; color: var(--teal); }
+
+  .chart-stack { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 90px); }
+  .chart-wrap {
+    flex: 1; min-height: 0; position: relative; border-radius: 10px;
+    overflow: hidden; background: var(--cream); border: 1px solid rgba(144,209,202,0.25);
+  }
+  .chart-wrap canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+  .chart-title-bar {
+    position: absolute; top: 6px; left: 72px; right: 20px; z-index: 3;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .chart-title-bar .label { font-weight: 700; font-size: 12px; color: var(--dark); }
+  .legend { display: flex; gap: 12px; font-size: 10px; color: rgba(26,26,26,0.6); }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .legend-swatch { width: 12px; height: 3px; border-radius: 1px; display: inline-block; }
+  .tooltip-box {
+    position: absolute; transform: translateX(-50%); background: var(--dark); color: var(--cream);
+    padding: 5px 9px; border-radius: 6px; font-size: 10px; line-height: 1.5;
+    pointer-events: none; z-index: 10; white-space: nowrap;
+    box-shadow: 0 4px 16px rgba(26,26,26,0.25); display: none;
+  }
+  .tooltip-box .tt-series { margin-bottom: 1px; }
+  .tooltip-box .tt-mint { color: var(--mint); }
+</style>
+</head>
+<body>
+
+<!-- ════════ Upload View ════════ -->
+<div id="upload-view">
+  <h1>rotortree benchmarks</h1>
+  <div class="subtitle">upload one or two CSVs to visualize and compare</div>
+  <div class="file-slots">
+    <div class="file-slot" id="slot-a" onclick="document.getElementById('input-a').click()">
+      <div class="name" id="name-a">dataset A</div>
+      <div class="info" id="info-a">click or drop csv</div>
+      <input type="file" id="input-a" accept=".csv" style="display:none">
+    </div>
+    <div class="file-slot slot-b" id="slot-b" onclick="document.getElementById('input-b').click()">
+      <div class="name" id="name-b">dataset B (optional)</div>
+      <div class="info" id="info-b">for compare view</div>
+      <input type="file" id="input-b" accept=".csv" style="display:none">
+    </div>
+  </div>
+  <div class="format-hint">leaves, block_ins_per_sec, durable_ins_per_sec, proof_gen_ns, proof_verify_ns, depth</div>
+  <button id="go-btn">visualize →</button>
+</div>
+
+<!-- ════════ Dashboard View ════════ -->
+<div id="dash-view">
+  <div class="dash-header">
+    <div>
+      <h1><span>◆</span> rotortree benchmarks</h1>
+      <div class="meta" id="dash-meta"></div>
+    </div>
+    <div class="header-btns">
+      <button class="btn-export" onclick="exportPNG()">export png ↓</button>
+      <button class="btn-back" onclick="goBack()">← new upload</button>
+    </div>
+  </div>
+  <div class="chart-stack" id="chart-stack"></div>
+</div>
+
+<script>
+// ─── State ───
+let dataA = null, dataB = null, labelA = "A", labelB = "B";
+const CHARTS = [
+  { key: "block_ins_per_sec", label: "block insertions/sec", unit: "ops" },
+  { key: "durable_ins_per_sec", label: "durable insertions/sec", unit: "ops" },
+  { key: "proof_gen_ns", label: "proof generation time", unit: "ns" },
+  { key: "proof_verify_ns", label: "proof verification time", unit: "ns" },
+];
+const COL_A = "#096B68", COL_B = "#129990";
+const C = { dark:"#1a1a1a", teal:"#096B68", tealMid:"#129990", mint:"#90D1CA", cream:"#F5EEDD", creamDark:"#e8dcc8" };
+const canvasRefs = [];
+const resizeObservers = [];
+
+// ─── Helpers ───
+function escapeHTML(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function parseCSV(text) {
+  const lines = text.trim().split("\n").filter(l => l.trim());
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(",").map(h => h.trim());
+  return lines.slice(1).map(line => {
+    const vals = line.split(",").map(v => v.trim());
+    const obj = {};
+    headers.forEach((h, i) => { obj[h] = Number(vals[i]); });
+    return obj;
+  }).filter(row => !isNaN(row.leaves));
+}
+function fmtY(val, unit) {
+  if (unit === "ns") return val.toLocaleString() + " ns";
+  if (val >= 1e6) return (val / 1e6).toFixed(1) + "M";
+  if (val >= 1e3) return (val / 1e3).toFixed(1) + "K";
+  return val.toLocaleString();
+}
+function fmtX(val) {
+  if (val >= 1e6) return (val / 1e6).toFixed(1) + "M";
+  if (val >= 1e3) return (val / 1e3).toFixed(0) + "K";
+  return val.toString();
+}
+
+// ─── File handling ───
+function readFile(file, cb) {
+  const r = new FileReader();
+  r.onload = e => { const rows = parseCSV(e.target.result); if (rows.length) cb(rows); };
+  r.readAsText(file);
+}
+
+document.getElementById("input-a").addEventListener("change", function() {
+  if (!this.files[0]) return;
+  const f = this.files[0];
+  labelA = f.name.replace(/\.csv$/i, "");
+  readFile(f, rows => {
+    dataA = rows;
+    document.getElementById("slot-a").classList.add("loaded");
+    document.getElementById("name-a").textContent = "✓ " + labelA;
+    document.getElementById("info-a").textContent = rows.length + " rows";
+    updateGoBtn();
+  });
+});
+document.getElementById("input-b").addEventListener("change", function() {
+  if (!this.files[0]) return;
+  const f = this.files[0];
+  labelB = f.name.replace(/\.csv$/i, "");
+  readFile(f, rows => {
+    dataB = rows;
+    document.getElementById("slot-b").classList.add("loaded");
+    document.getElementById("name-b").textContent = "✓ " + labelB;
+    document.getElementById("info-b").textContent = rows.length + " rows";
+    updateGoBtn();
+  });
+});
+
+// Drag & drop on entire upload view
+const uv = document.getElementById("upload-view");
+uv.addEventListener("dragover", e => e.preventDefault());
+uv.addEventListener("drop", e => {
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith(".csv"));
+  if (files[0] && !dataA) { const inp = document.getElementById("input-a"); const dt = new DataTransfer(); dt.items.add(files[0]); inp.files = dt.files; inp.dispatchEvent(new Event("change")); }
+  if (files[1]) { const inp = document.getElementById("input-b"); const dt = new DataTransfer(); dt.items.add(files[1]); inp.files = dt.files; inp.dispatchEvent(new Event("change")); }
+  else if (files[0] && dataA) { const inp = document.getElementById("input-b"); const dt = new DataTransfer(); dt.items.add(files[0]); inp.files = dt.files; inp.dispatchEvent(new Event("change")); }
+});
+
+function updateGoBtn() {
+  const btn = document.getElementById("go-btn");
+  if (dataA) {
+    btn.classList.add("active");
+    btn.textContent = dataB ? "compare →" : "visualize →";
+    btn.onclick = showDashboard;
+  }
+}
+
+// ─── Dashboard ───
+function showDashboard() {
+  document.getElementById("upload-view").style.display = "none";
+  document.getElementById("dash-view").style.display = "block";
+  const compare = dataB && dataB.length > 0;
+  const meta = document.getElementById("dash-meta");
+  meta.textContent = compare
+    ? `comparing ${labelA} (${dataA.length} pts) vs ${labelB} (${dataB.length} pts)`
+    : `${dataA.length} data points · leaves ${fmtX(dataA[0].leaves)} → ${fmtX(dataA[dataA.length - 1].leaves)}`;
+
+  const stack = document.getElementById("chart-stack");
+  stack.innerHTML = "";
+  canvasRefs.length = 0;
+  resizeObservers.forEach(o => o.disconnect());
+  resizeObservers.length = 0;
+
+  CHARTS.forEach((cfg, idx) => {
+    const wrap = document.createElement("div");
+    wrap.className = "chart-wrap";
+
+    // Title bar
+    const bar = document.createElement("div");
+    bar.className = "chart-title-bar";
+    bar.innerHTML = `<span class="label">${cfg.label}</span>`;
+    if (compare) {
+      bar.innerHTML += `<span class="legend">
+        <span class="legend-item"><span class="legend-swatch" style="background:${COL_A}"></span>${escapeHTML(labelA)}</span>
+        <span class="legend-item"><span class="legend-swatch" style="background:${COL_B}"></span>${escapeHTML(labelB)}</span>
+      </span>`;
+    }
+    wrap.appendChild(bar);
+
+    const canvas = document.createElement("canvas");
+    wrap.appendChild(canvas);
+    canvasRefs.push(canvas);
+
+    // Tooltip
+    const tt = document.createElement("div");
+    tt.className = "tooltip-box";
+    wrap.appendChild(tt);
+
+    stack.appendChild(wrap);
+
+    // Draw + tooltip wiring after layout
+    requestAnimationFrame(() => {
+      const rect = wrap.getBoundingClientRect();
+      drawChart(canvas, cfg, rect.width, rect.height);
+      wireTooltip(wrap, canvas, tt, cfg, rect.width, rect.height);
+    });
+
+    // Resize
+    const ro = new ResizeObserver(entries => {
+      const { width, height } = entries[0].contentRect;
+      if (width > 0 && height > 0) {
+        drawChart(canvas, cfg, width, height);
+        wireTooltip(wrap, canvas, tt, cfg, width, height);
+      }
+    });
+    ro.observe(wrap);
+    resizeObservers.push(ro);
+  });
+}
+
+function drawChart(canvas, cfg, w, h) {
+  const pad = { top: 28, right: 20, bottom: 36, left: 72 };
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  const compare = dataB && dataB.length > 0;
+  const allX = [...dataA.map(d => d.leaves), ...(compare ? dataB.map(d => d.leaves) : [])];
+  const allY = [...dataA.map(d => d[cfg.key]), ...(compare ? dataB.map(d => d[cfg.key]) : [])];
+  const xMin = allX.reduce((a, b) => a < b ? a : b), xMax = allX.reduce((a, b) => a > b ? a : b);
+  const yRawMin = allY.reduce((a, b) => a < b ? a : b), yRawMax = allY.reduce((a, b) => a > b ? a : b);
+  const yRange = yRawMax - yRawMin || 1;
+  const yMin = yRawMin - yRange * 0.1, yMax = yRawMax + yRange * 0.1;
+  const plotW = w - pad.left - pad.right;
+  const plotH = h - pad.top - pad.bottom;
+  const toX = v => pad.left + ((v - xMin) / (xMax - xMin || 1)) * plotW;
+  const toY = v => pad.top + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+
+  // BG
+  ctx.fillStyle = C.cream;
+  ctx.fillRect(0, 0, w, h);
+
+  // Grid
+  ctx.strokeStyle = C.creamDark;
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const val = yMin + (i / 4) * (yMax - yMin);
+    const y = toY(val);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+    ctx.fillStyle = C.dark + "88";
+    ctx.font = "10px 'JetBrains Mono', monospace";
+    ctx.textAlign = "right"; ctx.textBaseline = "middle";
+    ctx.fillText(fmtY(Math.round(val), cfg.unit), pad.left - 8, y);
+  }
+
+  // X labels
+  const uniqueX = [...new Set(allX)].sort((a, b) => a - b);
+  const xStep = Math.max(1, Math.floor(uniqueX.length / 8));
+  ctx.textAlign = "center"; ctx.textBaseline = "top";
+  ctx.fillStyle = C.dark + "88";
+  ctx.font = "10px 'JetBrains Mono', monospace";
+  for (let i = 0; i < uniqueX.length; i += xStep) {
+    ctx.fillText(fmtX(uniqueX[i]), toX(uniqueX[i]), h - pad.bottom + 6);
+  }
+
+  // Axis labels
+  ctx.fillStyle = C.dark + "aa";
+  ctx.font = "bold 10px 'JetBrains Mono', monospace";
+  ctx.textAlign = "center";
+  ctx.fillText("leaves", pad.left + plotW / 2, h - 2);
+  ctx.save(); ctx.translate(12, pad.top + plotH / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText(cfg.unit === "ns" ? "time (ns)" : "ops/sec", 0, 0); ctx.restore();
+
+  function drawLine(data, color, alpha) {
+    const xs = data.map(d => d.leaves), ys = data.map(d => d[cfg.key]);
+    const pts = data.map((d, i) => ({ x: toX(xs[i]), y: toY(ys[i]) }));
+    if (!pts.length) return;
+    const grad = ctx.createLinearGradient(0, pad.top, 0, h - pad.bottom);
+    grad.addColorStop(0, color + alpha); grad.addColorStop(1, color + "05");
+    ctx.beginPath(); ctx.moveTo(pts[0].x, h - pad.bottom);
+    pts.forEach(p => ctx.lineTo(p.x, p.y));
+    ctx.lineTo(pts[pts.length - 1].x, h - pad.bottom); ctx.closePath();
+    ctx.fillStyle = grad; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = "bevel"; ctx.stroke();
+  }
+
+  drawLine(dataA, COL_A, "22");
+  if (compare) drawLine(dataB, COL_B, "18");
+
+  // Store mapping for tooltip
+  canvas._chartMeta = { pad, xMin, xMax, yMin, yMax, plotW, plotH, toX, toY, w, h };
+}
+
+function wireTooltip(wrap, canvas, tt, cfg, w, h) {
+  const compare = dataB && dataB.length > 0;
+  const meta = canvas._chartMeta;
+  if (!meta) return;
+
+  // Build flat point list
+  const pts = [];
+  dataA.forEach(d => pts.push({ x: meta.toX(d.leaves), y: meta.toY(d[cfg.key]), data: d, series: "A" }));
+  if (compare) dataB.forEach(d => pts.push({ x: meta.toX(d.leaves), y: meta.toY(d[cfg.key]), data: d, series: "B" }));
+
+  wrap.onmousemove = e => {
+    const rect = wrap.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let closest = null, minD = Infinity;
+    pts.forEach(p => { const d = Math.hypot(p.x - mx, p.y - my); if (d < minD && d < 50) { minD = d; closest = p; } });
+    if (closest) {
+      let html = "";
+      if (compare) html += `<div class="tt-series" style="color:${closest.series === "A" ? COL_A : COL_B}">${escapeHTML(closest.series === "A" ? labelA : labelB)}</div>`;
+      html += `<div><span class="tt-mint">leaves:</span> ${closest.data.leaves.toLocaleString()}</div>`;
+      html += `<div><span class="tt-mint">${cfg.key}:</span> ${fmtY(closest.data[cfg.key], cfg.unit)}</div>`;
+      html += `<div><span class="tt-mint">depth:</span> ${closest.data.depth}</div>`;
+      tt.innerHTML = html;
+      tt.style.display = "block";
+      tt.style.left = Math.min(Math.max(closest.x, 80), w - 80) + "px";
+      tt.style.top = (closest.y - 60) + "px";
+    } else {
+      tt.style.display = "none";
+    }
+  };
+  wrap.onmouseleave = () => { tt.style.display = "none"; };
+}
+
+// ─── Export ───
+function exportPNG() {
+  if (!canvasRefs.length) return;
+  const padding = 24, gap = 16, titleH = 48;
+  const dpr = window.devicePixelRatio || 1;
+  const scale = dpr;
+  const cW = Math.max(...canvasRefs.map(c => c.width));
+  const cTotalH = canvasRefs.reduce((s, c) => s + c.height, 0);
+  const gapPx = gap * scale, padPx = padding * scale, titlePx = titleH * scale;
+
+  const out = document.createElement("canvas");
+  out.width = cW + padPx * 2;
+  out.height = titlePx + padPx + cTotalH + gapPx * (canvasRefs.length - 1) + padPx;
+  const ctx = out.getContext("2d");
+
+  ctx.fillStyle = C.cream; ctx.fillRect(0, 0, out.width, out.height);
+  ctx.fillStyle = C.teal;
+  ctx.font = `bold ${14 * scale}px 'JetBrains Mono', monospace`;
+  ctx.textBaseline = "middle";
+  ctx.fillText("◆", padPx, titlePx / 2);
+  ctx.fillStyle = C.dark;
+  const titleX = padPx + ctx.measureText("◆ ").width;
+  ctx.fillText("rotortree benchmarks", titleX, titlePx / 2);
+
+  // Legend if comparing
+  if (dataB && dataB.length > 0) {
+    const legendY = titlePx / 2;
+    const afterTitle = titleX + ctx.measureText("rotortree benchmarks").width + 32 * scale;
+    const swatchW = 14 * scale, swatchH = 3 * scale, labelGap = 6 * scale, itemGap = 20 * scale;
+    ctx.font = `${10 * scale}px 'JetBrains Mono', monospace`;
+
+    // Dataset A
+    ctx.fillStyle = COL_A;
+    ctx.fillRect(afterTitle, legendY - swatchH / 2, swatchW, swatchH);
+    ctx.fillStyle = C.dark + "99";
+    ctx.textBaseline = "middle";
+    ctx.fillText(labelA, afterTitle + swatchW + labelGap, legendY);
+    const aWidth = swatchW + labelGap + ctx.measureText(labelA).width + itemGap;
+
+    // Dataset B
+    ctx.fillStyle = COL_B;
+    ctx.fillRect(afterTitle + aWidth, legendY - swatchH / 2, swatchW, swatchH);
+    ctx.fillStyle = C.dark + "99";
+    ctx.fillText(labelB, afterTitle + aWidth + swatchW + labelGap, legendY);
+  }
+
+  let cy = titlePx + padPx;
+  canvasRefs.forEach(c => { ctx.drawImage(c, padPx, cy); cy += c.height + gapPx; });
+
+  out.toBlob(blob => {
+    const a = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = "rotortree-benchmarks.png";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, "image/png");
+}
+
+// ─── Back ───
+function goBack() {
+  document.getElementById("dash-view").style.display = "none";
+  document.getElementById("upload-view").style.display = "flex";
+  dataA = null; dataB = null; labelA = "A"; labelB = "B";
+  resizeObservers.forEach(o => o.disconnect());
+  resizeObservers.length = 0;
+  canvasRefs.length = 0;
+  document.getElementById("slot-a").classList.remove("loaded");
+  document.getElementById("slot-b").classList.remove("loaded");
+  document.getElementById("name-a").textContent = "dataset A";
+  document.getElementById("info-a").textContent = "click or drop csv";
+  document.getElementById("name-b").textContent = "dataset B (optional)";
+  document.getElementById("info-b").textContent = "for compare view";
+  document.getElementById("input-a").value = "";
+  document.getElementById("input-b").value = "";
+  const btn = document.getElementById("go-btn");
+  btn.classList.remove("active"); btn.textContent = "visualize →"; btn.onclick = null;
+}
+</script>
+</body>
+</html>

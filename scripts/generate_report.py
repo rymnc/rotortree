@@ -607,9 +607,12 @@ def generate_html(
     parts.append(
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'
         "<h1>rotortree benchmarks</h1>"
+        '<div style="display:flex;gap:8px">'
+        '<a href="../differ/" style="font-size:12px;color:#096B68;text-decoration:none;'
+        'border:1px solid #096B68;padding:4px 10px;border-radius:4px">differ &rarr;</a>'
         '<a href="../viz/" style="font-size:12px;color:#096B68;text-decoration:none;'
         'border:1px solid #096B68;padding:4px 10px;border-radius:4px">viz &rarr;</a>'
-        "</div>"
+        "</div></div>"
     )
     meta_items = []
     if "timestamp" in meta:
