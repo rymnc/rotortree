@@ -62,8 +62,8 @@ jobs:
             _site/index.html \
             _site/benchmarks/index.html \
             _site/differ/index.html \
-            _site/viz/index.html \
             --outdir=_site_bundled
+          cp -r _site/viz _site_bundled/viz
           rm -rf _site
           mv _site_bundled _site
 
