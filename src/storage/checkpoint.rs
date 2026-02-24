@@ -49,7 +49,7 @@ impl Default for CheckpointPolicy {
 /// Controls which tree levels are kept in memory vs mmap'd
 pub struct TieringConfig {
     /// Levels below this value have their committed chunks mmap'd after checkpoint.
-    /// Set to `usize::MAX` to never mmap (default: all in memory)
+    /// Set to `usize::MAX` to mmap all levels (default), `0` to keep everything in memory
     pub pin_above_level: usize,
 }
 

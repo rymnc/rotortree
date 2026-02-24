@@ -135,7 +135,7 @@ tree.close().unwrap();
 - `OnClose`: checkpoint only on graceful close
 
 `TieringConfig` controls which levels stay in memory vs get mmap'd after checkpoint:
-- `pin_above_level`: levels below this value have their committed chunks mmap'd from data files after checkpoint. set to `0` to keep everything in memory (default: `usize::MAX`, all checkpointed chunks get mmap'd)
+- `pin_above_level`: levels below this value have their committed chunks mmap'd from data files after checkpoint. set to `usize::MAX` to mmap everything (default), `0` to keep everything in memory
 
 ### Tuning
 
@@ -197,23 +197,32 @@ Head over to https://rymnc.github.io/rotortree/benchmarks which has the latest b
 
 <!-- ANCHOR: devnote --> 
 
-there seems to be some performance variance with the storage feature enabled, assume due to some contention / outliers. the pure in-memory benchmark (tree_bench_parallel) exhibits much lesser variance, and achieves peak throughput upto ~140M leaves/sec; why would anyone need this much? i do not know myself. single threaded by far has the best performance characteristic in terms of variance though, useful to keep in mind if that is a constraint; trading off performance for predictability under load.
+the pure in-memory benchmark (tree_bench_parallel) exhibits lesser variance in the benchmarks, and achieves peak throughput upto ~190M leaves/sec; why would anyone need this much? i do not know myself. single threaded by far has the best performance characteristic in terms of variance though, useful to keep in mind if that is a constraint; trading off performance for predictability under load.
 
 <!-- ANCHOR_END: devnote --> 
 
 > [!NOTE]
 > There are more realistic benchmarks that simulate performance under load, i.e concurrent reads / proof generation + insertions 
 
-#### Proof Latency vs Tree size
+### Sample benchmark
+
+test bench: 
+- m4 pro, 14c, 48gig
+- fully mmap'd, i.e `TieringConfig::pin_above_level`: `usize::MAX`
+- 1B leaves inserted in 1M chunks
+- manual checkpoint after each chunk insertion
+
+#### Proof Latency vs Tree size 
 
 ![Proof Latency vs Tree size](./assets/proof_latency_vs_tree_size.png)
+
+we can see here that verification is almost constant, with proof generation varying based on snapshot acquisition cost
 
 #### Throughput vs Tree size
 
 ![Throughput vs Tree size](./assets/throughput_vs_tree_size.png)
 
-The dips noticed here are during checkpoints
-
+we can see here that the leaves insertion per second stays comfortably above **120M/sec**, with durable insertions around **5M/sec**. this is all dependent on the manual checkpointing, you can have the checkpointing run in the background too. realistically in a crash scenario everything not committed to level files will just be replayed from the wal.
 
 ## Future work
 
