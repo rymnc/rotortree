@@ -122,7 +122,7 @@
 <div id="dash-view">
   <div class="dash-header">
     <div>
-      <h1><span>◆</span> rotortree benchmarks differ</h1>
+      <h1>rotortree benchmarks differ</h1>
       <div class="meta" id="dash-meta"></div>
     </div>
     <div class="header-btns">
@@ -247,18 +247,6 @@ function showDashboard() {
     const wrap = document.createElement("div");
     wrap.className = "chart-wrap";
 
-    // Title bar
-    const bar = document.createElement("div");
-    bar.className = "chart-title-bar";
-    bar.innerHTML = `<span class="label">${cfg.label}</span>`;
-    if (compare) {
-      bar.innerHTML += `<span class="legend">
-        <span class="legend-item"><span class="legend-swatch" style="background:${COL_A}"></span>${escapeHTML(labelA)}</span>
-        <span class="legend-item"><span class="legend-swatch" style="background:${COL_B}"></span>${escapeHTML(labelB)}</span>
-      </span>`;
-    }
-    wrap.appendChild(bar);
-
     const canvas = document.createElement("canvas");
     wrap.appendChild(canvas);
     canvasRefs.push(canvas);
@@ -365,6 +353,31 @@ function drawChart(canvas, cfg, w, h) {
   drawLine(dataA, COL_A, "22");
   if (compare) drawLine(dataB, COL_B, "18");
 
+  // Chart title (drawn on canvas so it appears in PNG export)
+  const titleY = pad.top / 2;
+  ctx.fillStyle = C.dark;
+  ctx.font = "bold 12px 'JetBrains Mono', monospace";
+  ctx.textAlign = "left"; ctx.textBaseline = "middle";
+  let labelX = pad.left;
+  ctx.fillText(cfg.label, labelX, titleY);
+  if (compare) {
+    labelX += ctx.measureText(cfg.label).width + 16;
+    ctx.font = "10px 'JetBrains Mono', monospace";
+    // Dataset A legend
+    ctx.fillStyle = COL_A;
+    ctx.fillRect(labelX, titleY - 1, 12, 3);
+    labelX += 16;
+    ctx.fillStyle = C.dark + "99";
+    ctx.fillText(labelA, labelX, titleY);
+    labelX += ctx.measureText(labelA).width + 12;
+    // Dataset B legend
+    ctx.fillStyle = COL_B;
+    ctx.fillRect(labelX, titleY - 1, 12, 3);
+    labelX += 16;
+    ctx.fillStyle = C.dark + "99";
+    ctx.fillText(labelB, labelX, titleY);
+  }
+
   // Store mapping for tooltip
   canvas._chartMeta = { pad, xMin, xMax, yMin, yMax, plotW, plotH, toX, toY, w, h };
 }
@@ -417,12 +430,10 @@ function exportPNG() {
   const ctx = out.getContext("2d");
 
   ctx.fillStyle = C.cream; ctx.fillRect(0, 0, out.width, out.height);
-  ctx.fillStyle = C.teal;
+  ctx.fillStyle = C.dark;
   ctx.font = `bold ${14 * scale}px 'JetBrains Mono', monospace`;
   ctx.textBaseline = "middle";
-  ctx.fillText("◆", padPx, titlePx / 2);
-  ctx.fillStyle = C.dark;
-  const titleX = padPx + ctx.measureText("◆ ").width;
+  const titleX = padPx;
   ctx.fillText("rotortree benchmarks differ", titleX, titlePx / 2);
 
   // Legend if comparing
