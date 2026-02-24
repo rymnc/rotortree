@@ -204,25 +204,16 @@ the pure in-memory benchmark (tree_bench_parallel) exhibits lesser variance in t
 > [!NOTE]
 > There are more realistic benchmarks that simulate performance under load, i.e concurrent reads / proof generation + insertions 
 
-### Sample benchmark
+### Sample benchmark (no mmap vs full mmap)
 
 test bench: 
 - m4 pro, 14c, 48gig
-- fully mmap'd, i.e `TieringConfig::pin_above_level`: `usize::MAX`
 - 1B leaves inserted in 1M chunks
 - manual checkpoint after each chunk insertion
 
-#### Proof Latency vs Tree size 
-
-![Proof Latency vs Tree size](./assets/proof_latency_vs_tree_size.png)
+![Proof Latency vs Tree size](./assets/no_mmap_vs_mmap.png)
 
 we can see here that verification is almost constant, with proof generation varying based on snapshot acquisition cost
-
-#### Throughput vs Tree size
-
-![Throughput vs Tree size](./assets/throughput_vs_tree_size.png)
-
-we can see here that the leaves insertion per second stays comfortably above **120M/sec**, with durable insertions around **5M/sec**. this is all dependent on the manual checkpointing, you can have the checkpointing run in the background too. realistically in a crash scenario everything not committed to level files will just be replayed from the wal.
 
 ## Future work
 
