@@ -203,9 +203,15 @@ impl ChunkedLevel {
         }
     }
 
+    /// Total number of hashes in this level.
+    #[inline]
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
     /// Read a hash at the given index.
     #[inline]
-    fn get(&self, index: usize) -> Result<Hash, TreeError> {
+    pub(crate) fn get(&self, index: usize) -> Result<Hash, TreeError> {
         let chunk_idx = index / CHUNK_SIZE;
         let offset = index % CHUNK_SIZE;
         if chunk_idx < self.chunk_count() {
@@ -218,7 +224,7 @@ impl ChunkedLevel {
     /// Copy a contiguous group of hashes into `out`.
     /// Fast path when the group falls within a single chunk or tail.
     #[inline(always)]
-    fn get_group(&self, start: usize, count: usize, out: &mut [Hash]) {
+    pub(crate) fn get_group(&self, start: usize, count: usize, out: &mut [Hash]) {
         let chunk_idx = start / CHUNK_SIZE;
         let offset = start % CHUNK_SIZE;
         if offset + count <= CHUNK_SIZE {
@@ -484,103 +490,12 @@ impl ChunkedLevel {
             &self.pending[idx - committed]
         }
     }
-
-    /// Create a snapshot level
-    fn snapshot(&self) -> SnapshotLevel {
-        SnapshotLevel {
-            segments: self.segments.clone(),
-            pending: self.pending.clone(),
-            tail: self.tail,
-            len: self.len,
-        }
-    }
-}
-
-/// Immutable view of a single tree level for proof generation.
-pub(crate) struct SnapshotLevel {
-    segments: Vec<Arc<[Chunk; CHUNKS_PER_SEGMENT]>>,
-    pending: Vec<Chunk>,
-    tail: [Hash; CHUNK_SIZE],
-    len: usize,
-}
-
-impl SnapshotLevel {
-    const EMPTY: Self = Self {
-        segments: Vec::new(),
-        pending: Vec::new(),
-        tail: [[0u8; 32]; CHUNK_SIZE],
-        len: 0,
-    };
-
-    /// Total number of committed chunks (segments + pending).
-    #[inline]
-    fn chunk_count(&self) -> usize {
-        self.segments.len() * CHUNKS_PER_SEGMENT + self.pending.len()
-    }
-
-    /// Resolve a chunk index to a slice reference.
-    #[inline(always)]
-    fn chunk_slice(&self, chunk_idx: usize) -> &[Hash; CHUNK_SIZE] {
-        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
-        if chunk_idx < committed {
-            let seg_idx = chunk_idx / CHUNKS_PER_SEGMENT;
-            let seg_off = chunk_idx % CHUNKS_PER_SEGMENT;
-            self.segments[seg_idx][seg_off].as_slice()
-        } else {
-            self.pending[chunk_idx - committed].as_slice()
-        }
-    }
-
-    #[inline]
-    pub(crate) fn get(&self, index: usize) -> Result<Hash, TreeError> {
-        let chunk_idx = index / CHUNK_SIZE;
-        let offset = index % CHUNK_SIZE;
-        if chunk_idx < self.chunk_count() {
-            Ok(self.chunk_slice(chunk_idx)[offset])
-        } else {
-            Ok(self.tail[offset])
-        }
-    }
-
-    #[inline]
-    pub(crate) fn get_group(&self, start: usize, count: usize, out: &mut [Hash]) {
-        let chunk_idx = start / CHUNK_SIZE;
-        let offset = start % CHUNK_SIZE;
-        if offset + count <= CHUNK_SIZE {
-            let src = if chunk_idx < self.chunk_count() {
-                &self.chunk_slice(chunk_idx)[offset..offset + count]
-            } else {
-                &self.tail[offset..offset + count]
-            };
-            out[..count].copy_from_slice(src);
-        } else {
-            for (i, item) in out.iter_mut().enumerate().take(count) {
-                *item = self.get(start + i).expect("checked prev; qed");
-            }
-        }
-    }
-
-    #[inline]
-    pub(crate) fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Get a reference to a chunk by index (test helper).
-    #[cfg(test)]
-    fn get_chunk(&self, idx: usize) -> &Chunk {
-        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
-        if idx < committed {
-            &self.segments[idx / CHUNKS_PER_SEGMENT][idx % CHUNKS_PER_SEGMENT]
-        } else {
-            &self.pending[idx - committed]
-        }
-    }
 }
 
 /// Immutable snapshot of the tree for lock-free reads and proof
 /// generation.
 pub struct TreeSnapshot<const N: usize, const MAX_DEPTH: usize> {
-    pub(crate) levels: [SnapshotLevel; MAX_DEPTH],
+    pub(crate) levels: [ChunkedLevel; MAX_DEPTH],
     pub(crate) root: Option<Hash>,
     pub(crate) size: u64,
     pub(crate) depth: usize,
@@ -750,10 +665,10 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
     }
 
     pub(crate) fn snapshot(&self) -> TreeSnapshot<N, MAX_DEPTH> {
-        let mut levels = [const { SnapshotLevel::EMPTY }; MAX_DEPTH];
+        let mut levels = core::array::from_fn(|_| ChunkedLevel::new());
         let snap_count = core::cmp::min(self.depth.saturating_add(1), MAX_DEPTH);
         for (dst, src) in levels.iter_mut().zip(self.levels.iter()).take(snap_count) {
-            *dst = src.snapshot();
+            *dst = src.clone();
         }
         TreeSnapshot {
             levels,
@@ -778,10 +693,7 @@ pub struct LeanIMT<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
     inner: TreeInner<N, MAX_DEPTH>,
     #[cfg(feature = "concurrent")]
     #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
-    inner: parking_lot::Mutex<TreeInner<N, MAX_DEPTH>>,
-    #[cfg(feature = "concurrent")]
-    #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
-    snapshot: arc_swap::ArcSwap<TreeSnapshot<N, MAX_DEPTH>>,
+    inner: parking_lot::RwLock<TreeInner<N, MAX_DEPTH>>,
 }
 
 impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH> {
@@ -805,12 +717,9 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     pub fn new(hasher: H) -> Self {
         let () = Self::_ASSERT_N;
         let () = Self::_ASSERT_DEPTH;
-        let inner = TreeInner::new();
-        let snap = inner.snapshot();
         Self {
             hasher,
-            inner: parking_lot::Mutex::new(inner),
-            snapshot: arc_swap::ArcSwap::from_pointee(snap),
+            inner: parking_lot::RwLock::new(TreeInner::new()),
         }
     }
 
@@ -824,11 +733,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     #[cfg(feature = "concurrent")]
     #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn insert(&self, leaf: Hash) -> Result<Hash, TreeError> {
-        let mut inner = self.inner.lock();
-        let root = Self::_insert(&mut inner, &self.hasher, leaf)?;
-        let snap = inner.snapshot();
-        self.snapshot.store(Arc::new(snap));
-        Ok(root)
+        Self::_insert(&mut self.inner.write(), &self.hasher, leaf)
     }
 
     /// Insert multiple leaves in a batch. Returns the new root.
@@ -841,11 +746,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     #[cfg(feature = "concurrent")]
     #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn insert_many(&self, leaves: &[Hash]) -> Result<Hash, TreeError> {
-        let mut inner = self.inner.lock();
-        let root = Self::_insert_many(&mut inner, &self.hasher, leaves)?;
-        let snap = inner.snapshot();
-        self.snapshot.store(Arc::new(snap));
-        Ok(root)
+        Self::_insert_many(&mut self.inner.write(), &self.hasher, leaves)
     }
 
     /// The current Merkle root, or `None` if the tree is empty.
@@ -858,7 +759,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     #[cfg(feature = "concurrent")]
     #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn root(&self) -> Option<Hash> {
-        self.snapshot.load().root
+        self.inner.read().root
     }
 
     /// Number of leaves in the tree.
@@ -871,7 +772,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     #[cfg(feature = "concurrent")]
     #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn size(&self) -> u64 {
-        self.snapshot.load().size
+        self.inner.read().size
     }
 
     /// Current depth (hash layers above the leaf level).
@@ -884,7 +785,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     #[cfg(feature = "concurrent")]
     #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
     pub fn depth(&self) -> usize {
-        self.snapshot.load().depth
+        self.inner.read().depth
     }
 
     /// Create an immutable snapshot for proof generation.
@@ -894,12 +795,10 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     }
 
     /// Create an immutable snapshot for proof generation.
-    ///
-    /// Returns an `Arc` for lock-free sharing across threads.
     #[cfg(feature = "concurrent")]
     #[cfg_attr(docsrs, doc(cfg(feature = "concurrent")))]
-    pub fn snapshot(&self) -> Arc<TreeSnapshot<N, MAX_DEPTH>> {
-        self.snapshot.load_full()
+    pub fn snapshot(&self) -> TreeSnapshot<N, MAX_DEPTH> {
+        self.inner.read().snapshot()
     }
 
     #[inline]
@@ -1228,12 +1127,12 @@ mod tests {
     }
 
     #[test]
-    fn chunked_level_snapshot_shares_arcs() {
+    fn chunked_level_clone_shares_arcs() {
         let mut level = ChunkedLevel::new();
         for i in 0..CHUNK_SIZE + 5 {
             level.push(leaf(i as u8)).unwrap();
         }
-        let snap = level.snapshot();
+        let snap = level.clone();
         assert_eq!(snap.len(), level.len);
         // The completed chunk Arc is shared.
         assert!(Chunk::ptr_eq(level.get_chunk(0), snap.get_chunk(0)));
