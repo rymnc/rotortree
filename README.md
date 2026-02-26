@@ -78,7 +78,7 @@ assert!(proof.verify(&Blake3Hasher).unwrap());
 ```
 
 optional feature flags for the in-memory mode:
-- `concurrent`: switches to `&self` methods with internal `Mutex` + lock-free snapshot reads via `ArcSwap`
+- `concurrent`: switches to `&self` methods with internal `RwLock` (via `parking_lot`)
 - `parallel`: enables rayon-parallelized `insert_many` for large batches (this works really well)
 - `wincode`: adds wincode serde derives to proof types
 
