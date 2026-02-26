@@ -989,3 +989,161 @@ fn wal_truncated_after_checkpoint() {
     assert_eq!(tree.size(), 50);
     tree.close().unwrap();
 }
+
+#[test]
+fn max_depth_mismatch() {
+    // given
+    let dir = tempfile::tempdir().unwrap();
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+    tree.insert(leaf(1)).unwrap();
+    tree.flush().unwrap();
+    tree.close().unwrap();
+
+    // when: reopen with different MAX_DEPTH
+    let result =
+        RotorTree::<XorHasher, 2, 20>::open(XorHasher, manual_config(dir.path()));
+
+    // then
+    match result {
+        Err(RotorTreeError::Storage(StorageError::ConfigMismatch {
+            expected_max_depth: 20,
+            actual_max_depth: 10,
+            ..
+        })) => {}
+        Err(e) => panic!("expected ConfigMismatch with max_depth 20 vs 10, got {e:?}"),
+        Ok(_) => panic!("expected ConfigMismatch, got Ok"),
+    }
+}
+
+#[test]
+fn multiple_checkpoint_cycles() {
+    // given
+    let dir = tempfile::tempdir().unwrap();
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+
+    // Cycle 1: insert 50, flush, checkpoint
+    let batch1: Vec<Hash> = (0..50u32).map(leaf).collect();
+    tree.insert_many(&batch1).unwrap();
+    tree.flush().unwrap();
+    tree.checkpoint().unwrap();
+
+    // Cycle 2: insert 50 more, flush, checkpoint
+    let batch2: Vec<Hash> = (50..100u32).map(leaf).collect();
+    tree.insert_many(&batch2).unwrap();
+    tree.flush().unwrap();
+    tree.checkpoint().unwrap();
+
+    // Cycle 3: insert 50 more, flush, checkpoint
+    let batch3: Vec<Hash> = (100..150u32).map(leaf).collect();
+    tree.insert_many(&batch3).unwrap();
+    tree.flush().unwrap();
+    tree.checkpoint().unwrap();
+
+    let root = tree.root();
+    tree.close().unwrap();
+
+    // when: reopen
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+
+    // then
+    assert_eq!(tree.size(), 150);
+    assert_eq!(tree.root(), root);
+    let snap = tree.snapshot();
+    for &idx in &[0u64, 49, 50, 99, 100, 149] {
+        let proof = snap.generate_proof(idx).unwrap();
+        assert!(proof.verify(&XorHasher).unwrap());
+    }
+    tree.close().unwrap();
+}
+
+#[test]
+fn file_lock_released_after_close() {
+    // given
+    let dir = tempfile::tempdir().unwrap();
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+    tree.insert(leaf(1)).unwrap();
+    tree.flush().unwrap();
+    tree.close().unwrap();
+
+    // when: open again in same dir
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+
+    // then: second open succeeded
+    assert_eq!(tree.size(), 1);
+    tree.close().unwrap();
+}
+
+#[test]
+fn large_batch_storage_segment_freeze() {
+    // given
+    let dir = tempfile::tempdir().unwrap();
+    let tree = RotorTree::<XorHasher, 2, 20>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+
+    // 33,000 leaves → 257 chunks → triggers freeze_pending at 256
+    let leaves: Vec<Hash> = (0..33_000u32).map(leaf).collect();
+    let (root, _) = tree.insert_many(&leaves).unwrap();
+    tree.flush().unwrap();
+    tree.checkpoint().unwrap();
+    tree.close().unwrap();
+
+    // when: reopen
+    let tree = RotorTree::<XorHasher, 2, 20>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+
+    // then
+    assert_eq!(tree.size(), 33_000);
+    assert_eq!(tree.root(), Some(root));
+    let snap = tree.snapshot();
+    for &idx in &[0u64, 1000, 16383, 32767, 32999] {
+        let proof = snap.generate_proof(idx).unwrap();
+        assert!(
+            proof.verify(&XorHasher).unwrap(),
+            "proof failed for idx {idx}"
+        );
+    }
+    tree.close().unwrap();
+}
+
+#[test]
+fn insert_many_after_checkpoint_recovery() {
+    // given
+    let dir = tempfile::tempdir().unwrap();
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+
+    let batch1: Vec<Hash> = (0..100u32).map(leaf).collect();
+    tree.insert_many(&batch1).unwrap();
+    tree.flush().unwrap();
+    tree.checkpoint().unwrap();
+    tree.close().unwrap();
+
+    // when: reopen and insert_many on recovered state
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+    assert_eq!(tree.size(), 100);
+
+    let batch2: Vec<Hash> = (100..200u32).map(leaf).collect();
+    tree.insert_many(&batch2).unwrap();
+    tree.flush().unwrap();
+
+    let root = tree.root();
+    tree.close().unwrap();
+
+    // then: reopen and verify full state
+    let tree = RotorTree::<XorHasher, 2, 10>::open(XorHasher, manual_config(dir.path()))
+        .unwrap();
+    assert_eq!(tree.size(), 200);
+    assert_eq!(tree.root(), root);
+    let snap = tree.snapshot();
+    for &idx in &[0u64, 50, 99, 100, 150, 199] {
+        let proof = snap.generate_proof(idx).unwrap();
+        assert!(proof.verify(&XorHasher).unwrap());
+    }
+    tree.close().unwrap();
+}
