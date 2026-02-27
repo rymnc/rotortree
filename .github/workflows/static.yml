@@ -51,6 +51,7 @@ jobs:
           cp assets/index.html _site/
           cp assets/benchmarks/* _site/benchmarks/
           cp assets/differ/* _site/differ/
+          cp assets/model/* _site/model/
           cp -r rotortree-viz/www/* _site/viz/
 
       - name: Install Bun
@@ -62,6 +63,7 @@ jobs:
             _site/index.html \
             _site/benchmarks/index.html \
             _site/differ/index.html \
+            _site/model/index.html \
             --outdir=_site_bundled
           cp -r _site/viz _site_bundled/viz
           rm -rf _site

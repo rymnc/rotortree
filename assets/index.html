@@ -37,12 +37,16 @@ h1 {
 .buttons {
   display: flex;
   gap: 16px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 .btn {
   font-family: 'JetBrains Mono', monospace;
   font-size: 14px;
   font-weight: 600;
   padding: 12px 32px;
+  min-width: min(140px, 100%);
+  text-align: center;
   border: 2px solid #096B68;
   border-radius: 6px;
   background: #096B68;
@@ -80,6 +84,7 @@ h1 {
 <p class="meta">n-ary lean incremental merkle tree</p>
 <div class="buttons">
   <a href="benchmarks" class="btn">benchmarks</a>
+  <a href="model" class="btn outline">model</a>
   <a href="viz" class="btn outline">viz</a>
 </div>
 <p class="credit">lean imt was pioneered by <a href="https://zkkit.org/leanimt-paper.pdf">cedoor &amp; vivian</a></p>

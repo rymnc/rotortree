@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rotortree parameter calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&display=swap" rel="stylesheet">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --dark: #1a1a1a; --teal: #096B68; --teal-mid: #129990;
+  --mint: #90D1CA; --cream: #F5EEDD; --cream-dark: #e8dcc8;
+}
+body {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--dark);
+  background: var(--cream);
+  padding: 32px 40px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 28px;
+}
+nav h1 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--teal);
+  letter-spacing: -0.02em;
+}
+nav h1 span { font-weight: 400; }
+.nav-links {
+  display: flex;
+  gap: 8px;
+}
+.nav-links a {
+  font-size: 12px;
+  color: var(--teal);
+  text-decoration: none;
+  border: 1px solid var(--teal);
+  padding: 4px 10px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.nav-links a:hover { background: rgba(9,107,104,0.1); }
+
+.controls {
+  display: grid;
+  grid-template-columns: 3fr 1fr 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 28px;
+  padding: 20px;
+  background: rgba(144,209,202,0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(144,209,202,0.25);
+}
+.control-group label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--teal);
+  margin-bottom: 4px;
+}
+.control-group .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.control-group input[type="range"] {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--teal);
+  height: 4px;
+}
+.control-group input[type="number"],
+.control-group input[type="text"] {
+  width: 120px;
+  flex-shrink: 0;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 4px 8px;
+  border: 1px solid var(--mint);
+  border-radius: 4px;
+  background: var(--cream);
+  color: var(--dark);
+}
+.control-group input[type="number"]:focus,
+.control-group input[type="text"]:focus {
+  outline: none;
+  border-color: var(--teal);
+}
+.val-display {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dark);
+  min-width: 36px;
+  text-align: right;
+}
+.override-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.override-row input[type="checkbox"] {
+  accent-color: var(--teal);
+}
+.override-row .hint {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--teal-mid);
+  opacity: 0.7;
+}
+.warning {
+  display: none;
+  font-size: 10px;
+  color: #c0392b;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.warning.visible { display: block; }
+
+.section-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--teal);
+  margin-bottom: 12px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin-bottom: 24px;
+}
+table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+th, td {
+  padding: 6px 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+th {
+  font-weight: 600;
+  color: var(--teal);
+  background: var(--mint);
+  border-bottom: 2px solid var(--teal-mid);
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+th:hover { background: rgba(144,209,202,0.85); }
+th:first-child, td:first-child { text-align: left; }
+td {
+  border-bottom: 1px solid rgba(144,209,202,0.2);
+}
+tbody tr { cursor: pointer; transition: background 0.1s; }
+tbody tr:hover { background: rgba(144,209,202,0.15); }
+tbody tr.selected { background: rgba(9,107,104,0.08); }
+td.best {
+  background: rgba(9,107,104,0.12);
+  font-weight: 700;
+}
+td.depth-warn {
+  color: #c0392b;
+  font-weight: 700;
+}
+
+.detail-panel {
+  margin-bottom: 24px;
+  border: 1px solid rgba(144,209,202,0.3);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.detail-panel.hidden { display: none; }
+.tabs {
+  display: flex;
+  background: rgba(144,209,202,0.12);
+  border-bottom: 1px solid rgba(144,209,202,0.25);
+}
+.tab {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border: none;
+  background: transparent;
+  color: var(--teal-mid);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tab:hover { background: rgba(144,209,202,0.15); }
+.tab.active {
+  color: var(--teal);
+  background: var(--cream);
+  border-bottom: 2px solid var(--teal);
+}
+.tab-content {
+  padding: 16px;
+  overflow-x: auto;
+}
+.tab-content table { width: auto; }
+.tab-content th { cursor: default; }
+.tab-content th:hover { background: var(--mint); }
+.side-by-side {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.side-by-side h3 {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--teal);
+  margin-bottom: 8px;
+}
+
+
+@media (max-width: 768px) {
+  body { padding: 16px; }
+  nav { flex-direction: column; align-items: flex-start; gap: 12px; }
+  .controls { grid-template-columns: 2fr 1fr; }
+  .side-by-side { grid-template-columns: 1fr; }
+  .tab { padding: 6px 10px; font-size: 11px; }
+}
+@media (max-width: 480px) {
+  .controls { grid-template-columns: 1fr; }
+  .tabs { flex-wrap: wrap; }
+  th, td { padding: 4px 8px; font-size: 11px; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <h1>rotortree <span>model</span></h1>
+  <div class="nav-links">
+    <a href="../benchmarks">benchmarks</a>
+    <a href="../differ">differ</a>
+    <a href="../viz">viz</a>
+  </div>
+</nav>
+
+<section class="controls">
+  <div class="control-group">
+    <label>Max leaf count (L)</label>
+    <div class="row">
+      <input type="range" id="l-slider" min="0" max="100" value="60" step="1">
+      <input type="text" id="l-input" inputmode="numeric" value="1,000,000">
+    </div>
+  </div>
+  <div class="control-group">
+    <label>Branching factor (N)</label>
+    <div class="row">
+      <input type="range" id="n-slider" min="2" max="16" value="4">
+      <span class="val-display" id="n-display">4</span>
+    </div>
+  </div>
+  <div class="control-group">
+    <label>
+      Max depth (D)
+      <span class="override-row">
+        <input type="checkbox" id="d-override">
+        <span class="hint">override auto</span>
+      </span>
+    </label>
+    <div class="row">
+      <input type="number" id="d-input" min="1" max="40" value="10" disabled>
+    </div>
+    <div class="warning" id="d-warning">D &lt; required depth for some configurations</div>
+  </div>
+  <div class="control-group">
+    <label>Batch size (b)</label>
+    <div class="row">
+      <input type="text" id="b-input" inputmode="numeric" value="10,000">
+    </div>
+  </div>
+  <div class="control-group">
+    <label>Tiering pin level</label>
+    <div class="row">
+      <input type="range" id="pin-slider" min="0" max="40" value="0">
+      <span class="val-display" id="pin-display">0</span>
+    </div>
+  </div>
+</section>
+
+<div class="section-title">Pareto Comparison</div>
+<div class="table-wrap">
+  <table id="pareto-table">
+    <thead>
+      <tr>
+        <th data-col="0">N</th>
+        <th data-col="1">Depth</th>
+        <th data-col="2">Max Capacity</th>
+        <th data-col="3">Inclusion Proof</th>
+        <th data-col="4">Consistency Proof</th>
+        <th data-col="5">Total Nodes</th>
+        <th data-col="6">Memory</th>
+        <th data-col="7">Disk</th>
+        <th data-col="8">Avg Hashes/Ins</th>
+        <th data-col="9">WAL Batch</th>
+      </tr>
+    </thead>
+    <tbody id="pareto-body"></tbody>
+  </table>
+</div>
+
+<section id="detail-panel" class="detail-panel hidden">
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-tab="per-level">Per-Level</button>
+    <button class="tab" data-tab="proofs">Proofs</button>
+    <button class="tab" data-tab="storage">Storage</button>
+    <button class="tab" data-tab="tiering">Tiering</button>
+  </div>
+  <div class="tab-content" id="tab-content"></div>
+</section>
+
+
+<script>
+const C = 128n, H = 32n, B = 4096n, S = 256n;
+const PARETO_NS = [2n, 3n, 4n, 8n, 16n];
+
+function ceilDiv(a, b) {
+  if (a <= 0n) return 0n;
+  return (a + b - 1n) / b;
+}
+
+function treeDepth(L, N) {
+  if (L <= 1n) return 0n;
+  return BigInt(Math.ceil(Math.log2(Number(L)) / Math.log2(Number(N))));
+}
+
+function levelSize(L, N, k) {
+  if (L === 0n) return 0n;
+  return ceilDiv(L, N ** k);
+}
+
+function totalNodes(L, N) {
+  const d = treeDepth(L, N);
+  let total = 0n;
+  for (let k = 0n; k <= d; k++) total += levelSize(L, N, k);
+  return total;
+}
+
+function maxCapacity(N, D) { return N ** D; }
+
+function inclusionFieldBytes(N, D) { return 80n + D * (2n + 32n * N); }
+function consistencyFieldBytes(N, D) { return 88n + D * (2n + 32n * N); }
+function alignUp(n, a) { return (n + a - 1n) / a * a; }
+function inclusionMemSize(N, D) { return alignUp(inclusionFieldBytes(N, D), 8n); }
+function consistencyMemSize(N, D) { return alignUp(consistencyFieldBytes(N, D), 8n); }
+
+function memLevel(l) { return (l / C) * 4112n + 4096n; }
+
+function totalMemory(L, N, D) {
+  const d = treeDepth(L, N);
+  let total = 0n;
+  const activeMax = d < D ? d : D - 1n;
+  for (let k = 0n; k <= activeMax; k++) total += memLevel(levelSize(L, N, k));
+  for (let k = activeMax + 1n; k < D; k++) total += 4096n;
+  return total;
+}
+
+function dataFileSize(l) { return (l / C) * B; }
+
+function totalDisk(L, N, D) {
+  const d = treeDepth(L, N);
+  let files = 0n;
+  const activeMax = d < D ? d : D - 1n;
+  for (let k = 0n; k <= activeMax; k++) files += dataFileSize(levelSize(L, N, k));
+  return files + D * B + 25n + 73n;
+}
+
+function walBatchEntry(b) { return 20n + 32n * b; }
+
+function avgHashesPerInsert(L, N) {
+  const d = Number(treeDepth(L, N));
+  const n = Number(N);
+  return d * (1 - 1 / n);
+}
+
+function mmapSavings(L, N, D, pin) {
+  const d = treeDepth(L, N);
+  let savings = 0n;
+  const maxK = pin < D ? pin : D;
+  const activeMax = d < D ? d : D - 1n;
+  for (let k = 0n; k < maxK && k <= activeMax; k++) {
+    savings += (levelSize(L, N, k) / C) * 4112n;
+  }
+  return savings;
+}
+
+function fmtBig(n) {
+  if (n <= 999_999_999_999_999n) return Number(n).toLocaleString();
+  const s = n.toString();
+  return s[0] + '.' + s.substring(1, 4) + '\u00d710\u207b'.replace('\u207b', '') + '^' + (s.length - 1);
+}
+
+function fmtBytes(n) {
+  if (n < 1024n) return Number(n) + ' B';
+  const v = Number(n);
+  if (v < 1024 * 1024) return (v / 1024).toFixed(1) + ' KB';
+  if (v < 1024 * 1024 * 1024) return (v / (1024 * 1024)).toFixed(1) + ' MB';
+  return (v / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+}
+
+function fmtFloat(n, d) { return n.toFixed(d === undefined ? 2 : d); }
+
+const lSlider = document.getElementById('l-slider');
+const lInput = document.getElementById('l-input');
+const nSlider = document.getElementById('n-slider');
+const nDisplay = document.getElementById('n-display');
+const dOverride = document.getElementById('d-override');
+const dInput = document.getElementById('d-input');
+const dWarning = document.getElementById('d-warning');
+const bInput = document.getElementById('b-input');
+const pinSlider = document.getElementById('pin-slider');
+const pinDisplay = document.getElementById('pin-display');
+const paretoBody = document.getElementById('pareto-body');
+const detailPanel = document.getElementById('detail-panel');
+const tabContent = document.getElementById('tab-content');
+
+let selectedN = null;
+let activeTab = 'per-level';
+let highlightedCol = -1;
+
+function parseCommas(s) { return parseInt(String(s).replace(/,/g, '')) || 0; }
+function addCommas(n) { return Number(n).toLocaleString('en-US'); }
+function formatInput(el) {
+  const pos = el.selectionStart;
+  const old = el.value;
+  const raw = parseCommas(old);
+  const formatted = raw > 0 ? addCommas(raw) : '0';
+  if (formatted !== old) {
+    const added = formatted.length - old.length;
+    el.value = formatted;
+    el.setSelectionRange(pos + added, pos + added);
+  }
+}
+
+function getL() {
+  const v = parseCommas(lInput.value);
+  return BigInt(Math.max(0, Math.min(10_000_000_000, v)));
+}
+function getN() { return BigInt(parseInt(nSlider.value) || 4); }
+function getD() {
+  if (dOverride.checked) return BigInt(parseInt(dInput.value) || 1);
+  return treeDepth(getL(), getN()) || 1n;
+}
+function getBatch() { return BigInt(Math.max(1, parseCommas(bInput.value))); }
+function getPin() { return BigInt(parseInt(pinSlider.value) || 0); }
+
+function sliderToL(v) { return Math.round(Math.pow(10, v / 10)); }
+function lToSlider(l) { return l <= 0 ? 0 : Math.round(10 * Math.log10(Math.max(1, l))); }
+
+lSlider.addEventListener('input', () => {
+  lInput.value = addCommas(sliderToL(parseFloat(lSlider.value)));
+  update();
+});
+lInput.addEventListener('input', () => {
+  formatInput(lInput);
+  lSlider.value = lToSlider(parseCommas(lInput.value));
+  update();
+});
+bInput.addEventListener('input', () => {
+  formatInput(bInput);
+  update();
+});
+nSlider.addEventListener('input', () => {
+  nDisplay.textContent = nSlider.value;
+  update();
+});
+dOverride.addEventListener('change', () => {
+  dInput.disabled = !dOverride.checked;
+  update();
+});
+dInput.addEventListener('input', update);
+pinSlider.addEventListener('input', () => {
+  pinDisplay.textContent = pinSlider.value;
+  update();
+});
+
+document.querySelectorAll('#pareto-table th').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = parseInt(th.dataset.col);
+    highlightedCol = highlightedCol === col ? -1 : col;
+    applyHighlight();
+  });
+});
+
+function applyHighlight() {
+  const rows = paretoBody.querySelectorAll('tr');
+  rows.forEach(tr => {
+    Array.from(tr.cells).forEach(td => td.classList.remove('best'));
+  });
+  if (highlightedCol < 0 || rows.length === 0) return;
+
+  const vals = [];
+  rows.forEach(tr => {
+    const td = tr.cells[highlightedCol];
+    if (td && td.dataset.val) vals.push({ td, v: BigInt(td.dataset.val) });
+  });
+  if (vals.length === 0) return;
+
+  const best = highlightedCol === 2
+    ? vals.reduce((a, b) => a.v > b.v ? a : b).v
+    : vals.reduce((a, b) => a.v < b.v ? a : b).v;
+
+  vals.forEach(({ td, v }) => { if (v === best) td.classList.add('best'); });
+}
+
+document.getElementById('tabs').addEventListener('click', e => {
+  if (!e.target.classList.contains('tab')) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  e.target.classList.add('active');
+  activeTab = e.target.dataset.tab;
+  renderDetail();
+});
+
+paretoBody.addEventListener('click', e => {
+  const tr = e.target.closest('tr');
+  if (!tr || !tr.dataset.n) return;
+  const n = BigInt(tr.dataset.n);
+  selectedN = selectedN === n ? null : n;
+  updateRowSelection();
+  if (selectedN !== null) {
+    detailPanel.classList.remove('hidden');
+    renderDetail();
+  } else {
+    detailPanel.classList.add('hidden');
+  }
+});
+
+function updateRowSelection() {
+  paretoBody.querySelectorAll('tr').forEach(tr => {
+    tr.classList.toggle('selected', selectedN !== null && BigInt(tr.dataset.n) === selectedN);
+  });
+}
+
+function update() {
+  const L = getL();
+  const D = getD();
+  const b = getBatch();
+  const pin = getPin();
+
+  if (!dOverride.checked) {
+    dInput.value = Number(D);
+  }
+
+  let anyWarn = false;
+  PARETO_NS.forEach(n => { if (treeDepth(L, n) > D) anyWarn = true; });
+  dWarning.classList.toggle('visible', anyWarn);
+
+  pinSlider.max = Number(D);
+  if (getPin() > D) { pinSlider.value = Number(D); pinDisplay.textContent = Number(D); }
+
+  let html = '';
+  PARETO_NS.forEach(n => {
+    const d = treeDepth(L, n);
+    const depthWarn = d > D;
+    const cap = maxCapacity(n, D);
+    const inclBytes = inclusionFieldBytes(n, D);
+    const consBytes = consistencyFieldBytes(n, D);
+    const nodes = totalNodes(L, n);
+    const mem = totalMemory(L, n, D);
+    const disk = totalDisk(L, n, D);
+    const avgH = avgHashesPerInsert(L, n);
+    const wal = walBatchEntry(b);
+
+    html += `<tr data-n="${n}">`;
+    html += `<td data-val="${n}">${n}</td>`;
+    html += `<td data-val="${d}" class="${depthWarn ? 'depth-warn' : ''}">${d}${depthWarn ? ' !' : ''}</td>`;
+    html += `<td data-val="${cap}">${fmtBig(cap)}</td>`;
+    html += `<td data-val="${inclBytes}">${fmtBytes(inclBytes)}</td>`;
+    html += `<td data-val="${consBytes}">${fmtBytes(consBytes)}</td>`;
+    html += `<td data-val="${nodes}">${fmtBig(nodes)}</td>`;
+    html += `<td data-val="${mem}">${fmtBytes(mem)}</td>`;
+    html += `<td data-val="${disk}">${fmtBytes(disk)}</td>`;
+    html += `<td data-val="${BigInt(Math.round(avgH * 1000))}">${fmtFloat(avgH)}</td>`;
+    html += `<td data-val="${wal}">${fmtBytes(wal)}</td>`;
+    html += '</tr>';
+  });
+  paretoBody.innerHTML = html;
+
+  updateRowSelection();
+  applyHighlight();
+  if (selectedN !== null) renderDetail();
+}
+
+function renderDetail() {
+  const L = getL(), D = getD(), b = getBatch(), pin = getPin();
+  const N = selectedN;
+  if (N === null) return;
+
+  switch (activeTab) {
+    case 'per-level': tabContent.innerHTML = renderPerLevel(L, N, D); break;
+    case 'proofs': tabContent.innerHTML = renderProofs(L, N, D); break;
+    case 'storage': tabContent.innerHTML = renderStorageTab(L, N, D, b); break;
+    case 'tiering': tabContent.innerHTML = renderTieringTab(L, N, D); break;
+  }
+}
+
+function renderPerLevel(L, N, D) {
+  const d = treeDepth(L, N);
+  const activeMax = d < D ? d : D - 1n;
+  let html = '<table><thead><tr>';
+  html += '<th>Level</th><th>Nodes</th><th>Full Chunks</th><th>Tail Len</th>';
+  html += '<th>Segments</th><th>Pending</th><th>Memory</th><th>Data File</th>';
+  html += '</tr></thead><tbody>';
+
+  let totalN = 0n, totalChunks = 0n, totalSegs = 0n, totalPend = 0n, totalMem = 0n, totalFile = 0n;
+
+  for (let k = 0n; k <= activeMax; k++) {
+    const l = levelSize(L, N, k);
+    const fc = l / C;
+    const tl = l % C;
+    const seg = fc / S;
+    const pend = fc % S;
+    const mem = memLevel(l);
+    const df = dataFileSize(l);
+
+    totalN += l; totalChunks += fc; totalSegs += seg; totalPend += pend; totalMem += mem; totalFile += df;
+
+    html += `<tr>`;
+    html += `<td>${k}</td><td>${fmtBig(l)}</td><td>${fmtBig(fc)}</td><td>${tl}</td>`;
+    html += `<td>${fmtBig(seg)}</td><td>${pend}</td><td>${fmtBytes(mem)}</td><td>${fmtBytes(df)}</td>`;
+    html += '</tr>';
+  }
+
+  const emptyCount = D - 1n - activeMax;
+  if (emptyCount > 0n) {
+    const emptyMem = emptyCount * 4096n;
+    totalMem += emptyMem;
+    html += `<tr style="opacity:0.5"><td colspan="2">${emptyCount} empty levels</td>`;
+    html += `<td>0</td><td>0</td><td>0</td><td>0</td><td>${fmtBytes(emptyMem)}</td><td>0 B</td></tr>`;
+  }
+
+  html += `<tr style="font-weight:700;border-top:2px solid var(--teal-mid)">`;
+  html += `<td>Total</td><td>${fmtBig(totalN)}</td><td>${fmtBig(totalChunks)}</td><td>-</td>`;
+  html += `<td>${fmtBig(totalSegs)}</td><td>${totalPend}</td><td>${fmtBytes(totalMem)}</td><td>${fmtBytes(totalFile)}</td>`;
+  html += '</tr></tbody></table>';
+  return html;
+}
+
+function renderProofs(L, N, D) {
+  const d = treeDepth(L, N);
+  const inclField = inclusionFieldBytes(N, D);
+  const consField = consistencyFieldBytes(N, D);
+  const inclMem = inclusionMemSize(N, D);
+  const consMem = consistencyMemSize(N, D);
+  const inclActive = 80n + d * (2n + 32n * N);
+  const consActive = 88n + d * (2n + 32n * N);
+  const maxSiblings = d * (N - 1n);
+  const perLevel = 2n + 32n * N;
+
+  let html = '<div class="side-by-side"><div>';
+  html += '<h3>Inclusion Proof (NaryProof&lt;N, D&gt;)</h3>';
+  html += '<table><tbody>';
+  html += `<tr><td>root</td><td>32 B</td></tr>`;
+  html += `<tr><td>leaf</td><td>32 B</td></tr>`;
+  html += `<tr><td>leaf_index (u64)</td><td>8 B</td></tr>`;
+  html += `<tr><td>level_count (usize)</td><td>8 B</td></tr>`;
+  html += `<tr><td>per level (pos + count + ${N} siblings)</td><td>${fmtBytes(perLevel)}</td></tr>`;
+  html += `<tr><td>D levels</td><td>${D} &times; ${fmtBytes(perLevel)}</td></tr>`;
+  html += `<tr style="font-weight:700"><td>field_bytes</td><td>${fmtBytes(inclField)}</td></tr>`;
+  html += `<tr style="font-weight:700"><td>mem::size_of</td><td>${fmtBytes(inclMem)}</td></tr>`;
+  html += `<tr><td>active data (depth=${d})</td><td>${fmtBytes(inclActive)}</td></tr>`;
+  html += `<tr><td>max siblings</td><td>${fmtBig(maxSiblings)}</td></tr>`;
+  html += '</tbody></table></div>';
+
+  html += '<div>';
+  html += '<h3>Consistency Proof (ConsistencyProof&lt;N, D&gt;)</h3>';
+  html += '<table><tbody>';
+  html += `<tr><td>old_root</td><td>32 B</td></tr>`;
+  html += `<tr><td>new_root</td><td>32 B</td></tr>`;
+  html += `<tr><td>old_size (u64)</td><td>8 B</td></tr>`;
+  html += `<tr><td>new_size (u64)</td><td>8 B</td></tr>`;
+  html += `<tr><td>level_count (usize)</td><td>8 B</td></tr>`;
+  html += `<tr><td>per level (shared + new + ${N} hashes)</td><td>${fmtBytes(perLevel)}</td></tr>`;
+  html += `<tr><td>D levels</td><td>${D} &times; ${fmtBytes(perLevel)}</td></tr>`;
+  html += `<tr style="font-weight:700"><td>field_bytes</td><td>${fmtBytes(consField)}</td></tr>`;
+  html += `<tr style="font-weight:700"><td>mem::size_of</td><td>${fmtBytes(consMem)}</td></tr>`;
+  html += `<tr><td>active data (depth=${d})</td><td>${fmtBytes(consActive)}</td></tr>`;
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
+function renderStorageTab(L, N, D, b) {
+  const d = treeDepth(L, N);
+  const activeMax = d < D ? d : D - 1n;
+  let dataTotal = 0n;
+  for (let k = 0n; k <= activeMax; k++) dataTotal += dataFileSize(levelSize(L, N, k));
+
+  const tailsFile = D * B;
+  const headerBin = 25n;
+  const metaFile = 73n;
+  const walSingle = 50n;
+  const walBatch = walBatchEntry(b);
+  const walHeader = 21n;
+  const diskTotal = dataTotal + tailsFile + headerBin + metaFile;
+
+  let html = '<div class="side-by-side"><div>';
+  html += '<table><thead><tr><th style="text-align:left">Component</th><th>Size</th></tr></thead><tbody>';
+  html += `<tr><td>WAL header frame</td><td>${walHeader} B</td></tr>`;
+  html += `<tr><td>Checkpoint header (header.bin)</td><td>${headerBin} B</td></tr>`;
+  html += `<tr><td>Checkpoint meta (checkpoint.meta)</td><td>${metaFile} B</td></tr>`;
+  html += `<tr><td>WAL single insert entry</td><td>${walSingle} B</td></tr>`;
+  html += `<tr><td>WAL batch entry (b=${fmtBig(b)})</td><td>${fmtBytes(walBatch)}</td></tr>`;
+  html += `<tr><td>Tails file (${D} levels &times; 4096)</td><td>${fmtBytes(tailsFile)}</td></tr>`;
+  html += `<tr><td>Data files total</td><td>${fmtBytes(dataTotal)}</td></tr>`;
+  html += `<tr style="font-weight:700;border-top:2px solid var(--teal-mid)"><td>Checkpoint disk total (excl. WAL)</td><td>${fmtBytes(diskTotal)}</td></tr>`;
+  html += '</tbody></table></div>';
+
+  html += '<div><table><thead><tr><th>Level</th><th>Nodes</th><th>Full Chunks</th><th>Data File</th></tr></thead><tbody>';
+  for (let k = 0n; k <= activeMax; k++) {
+    const l = levelSize(L, N, k);
+    html += `<tr><td>${k}</td><td>${fmtBig(l)}</td><td>${fmtBig(l / C)}</td><td>${fmtBytes(dataFileSize(l))}</td></tr>`;
+  }
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
+function renderTieringTab(L, N, D) {
+  const d = treeDepth(L, N);
+  const totalMem = totalMemory(L, N, D);
+
+  let html = '<table><thead><tr><th>Pin Level</th><th>Mmap Savings</th><th>Remaining RSS</th><th>% Savings</th></tr></thead><tbody>';
+
+  const maxPin = (d < D ? d : D - 1n) + 1n;
+  for (let p = 0n; p <= maxPin; p++) {
+    const savings = mmapSavings(L, N, D, p);
+    const remaining = totalMem > savings ? totalMem - savings : 0n;
+    const pct = totalMem > 0n ? Number(savings * 10000n / totalMem) / 100 : 0;
+
+    html += `<tr${p === getPin() ? ' style="font-weight:700"' : ''}>`;
+    html += `<td>${p}</td><td>${fmtBytes(savings)}</td><td>${fmtBytes(remaining)}</td><td>${fmtFloat(pct, 1)}%</td>`;
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+update();
+</script>
+</body>
+</html>
