@@ -5,6 +5,14 @@ use crate::{
     tree::TreeSnapshot,
 };
 
+fn to_usize(v: u64) -> Result<usize, TreeError> {
+    usize::try_from(v).map_err(|_| TreeError::MathError)
+}
+
+fn to_u8(v: usize) -> Result<u8, TreeError> {
+    u8::try_from(v).map_err(|_| TreeError::MathError)
+}
+
 /// One level of an N-ary Merkle proof.
 ///
 /// Uses a fixed-size `[Hash; N]` array (at most `N-1` siblings
@@ -75,6 +83,228 @@ impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
     }
 }
 
+/// Per-level data in a consistency proof
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
+pub struct ConsistencyLevel<const N: usize> {
+    /// Number of shared (left) siblings in `hashes`
+    pub shared_count: u8,
+    /// Number of new-only (right) siblings in `hashes`.
+    pub new_count: u8,
+    /// `[shared..., new...]` hashes
+    pub hashes: [Hash; N],
+}
+
+impl<const N: usize> ConsistencyLevel<N> {
+    const EMPTY: Self = Self {
+        shared_count: 0,
+        new_count: 0,
+        hashes: [[0u8; 32]; N],
+    };
+}
+
+/// Consistency proof
+///
+/// Proves that a tree of `old_size` leaves is a prefix of a tree of
+/// `new_size` leaves
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
+pub struct ConsistencyProof<const N: usize, const MAX_DEPTH: usize> {
+    /// Root of the old (smaller) tree
+    pub old_root: Hash,
+    /// Root of the new (larger) tree
+    pub new_root: Hash,
+    /// Number of leaves in the old tree
+    pub old_size: u64,
+    /// Number of leaves in the new tree
+    pub new_size: u64,
+    /// Number of valid levels in `levels`
+    pub level_count: usize,
+    /// Proof levels from leaves toward root
+    pub levels: [ConsistencyLevel<N>; MAX_DEPTH],
+}
+
+impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
+    /// Verify this consistency proof against the given hasher.
+    ///
+    /// Returns `Ok(true)` if both reconstructed roots match.
+    pub fn verify<H: Hasher>(&self, hasher: &H) -> Result<bool, TreeError> {
+        if self.old_size == 0
+            || self.new_size == 0
+            || self.old_size > self.new_size
+            || self.level_count > MAX_DEPTH
+        {
+            return Err(TreeError::MathError);
+        }
+
+        if self.old_size == self.new_size {
+            return Ok(self.old_root == self.new_root);
+        }
+        if self.level_count == 0 {
+            return Ok(false);
+        }
+
+        let mut old_level_size = to_usize(self.old_size)?;
+        let mut old_hash = [0u8; 32];
+        let mut new_hash = [0u8; 32];
+
+        for (i, level) in self.levels[..self.level_count].iter().enumerate() {
+            let shared = level.shared_count as usize;
+            let new_only = level.new_count as usize;
+            let boundary_pos = (old_level_size - 1) % N;
+
+            let (expected_shared, max_sum) = if i == 0 {
+                (boundary_pos + 1, N)
+            } else {
+                (boundary_pos, N - 1)
+            };
+            if shared != expected_shared || shared + new_only > max_sum {
+                return Err(TreeError::MathError);
+            }
+
+            let (old_mid, new_mid) = if i == 0 {
+                (level.hashes[boundary_pos], level.hashes[boundary_pos])
+            } else {
+                (old_hash, new_hash)
+            };
+
+            let new_child_count = boundary_pos + 1 + new_only;
+            let mut children = [[0u8; 32]; N];
+            children[..boundary_pos].copy_from_slice(&level.hashes[..boundary_pos]);
+            children[boundary_pos] = old_mid;
+            old_hash = if boundary_pos > 0 {
+                hasher.hash_children(&children[..boundary_pos + 1])
+            } else {
+                old_mid
+            };
+            children[boundary_pos] = new_mid;
+            children[boundary_pos + 1..new_child_count]
+                .copy_from_slice(&level.hashes[shared..shared + new_only]);
+            new_hash = if new_child_count > 1 {
+                hasher.hash_children(&children[..new_child_count])
+            } else {
+                new_mid
+            };
+
+            old_level_size = old_level_size.div_ceil(N);
+        }
+
+        Ok(old_hash == self.old_root && new_hash == self.new_root)
+    }
+
+    /// Update an existing inclusion proof from `old_root` to `new_root`.
+    ///
+    /// Given a valid `NaryProof` for some leaf against `old_root`, produces
+    /// a valid `NaryProof` for the same leaf against `new_root` using only
+    /// the data in this consistency proof
+    pub fn update_inclusion_proof<H: Hasher>(
+        &self,
+        old_proof: &NaryProof<N, MAX_DEPTH>,
+        hasher: &H,
+    ) -> Result<NaryProof<N, MAX_DEPTH>, TreeError> {
+        if old_proof.root != self.old_root {
+            return Err(TreeError::MathError);
+        }
+        if old_proof.leaf_index >= self.old_size {
+            return Err(TreeError::IndexOutOfRange {
+                index: old_proof.leaf_index,
+                size: self.old_size,
+            });
+        }
+
+        if self.old_size == self.new_size {
+            return Ok(*old_proof);
+        }
+
+        let mut new_levels = [ProofLevel::<N>::EMPTY; MAX_DEPTH];
+        let mut old_level_size = to_usize(self.old_size)?;
+        let mut member_idx = to_usize(old_proof.leaf_index)?;
+        let mut new_boundary_hash = [0u8; 32];
+
+        for (tree_level, level) in self.levels[..self.level_count].iter().enumerate() {
+            let boundary = old_level_size - 1;
+            let boundary_pos = boundary % N;
+            let member_pos = member_idx % N;
+
+            let shared = level.shared_count as usize;
+            let new_only = level.new_count as usize;
+
+            if member_idx / N != boundary / N {
+                if tree_level < old_proof.level_count {
+                    new_levels[tree_level] = old_proof.levels[tree_level];
+                }
+            } else {
+                let mut group = [[0u8; 32]; N];
+                let old_group_size = if tree_level < old_proof.level_count {
+                    let old_level = &old_proof.levels[tree_level];
+                    let group_size = (old_level.sibling_count as usize) + 1;
+                    group[..member_pos]
+                        .copy_from_slice(&old_level.siblings[..member_pos]);
+                    if member_pos + 1 < group_size {
+                        group[member_pos + 1..group_size].copy_from_slice(
+                            &old_level.siblings[member_pos..group_size - 1],
+                        );
+                    }
+                    group_size
+                } else {
+                    1
+                };
+
+                if tree_level > 0 && member_pos != boundary_pos {
+                    group[boundary_pos] = new_boundary_hash;
+                }
+
+                let new_group_size = old_group_size + new_only;
+                if new_only > 0 {
+                    group[old_group_size..new_group_size]
+                        .copy_from_slice(&level.hashes[shared..shared + new_only]);
+                }
+
+                let mut siblings = [[0u8; 32]; N];
+                siblings[..member_pos].copy_from_slice(&group[..member_pos]);
+                if member_pos + 1 < new_group_size {
+                    siblings[member_pos..new_group_size - 1]
+                        .copy_from_slice(&group[member_pos + 1..new_group_size]);
+                }
+
+                new_levels[tree_level] = ProofLevel {
+                    position: to_u8(member_pos)?,
+                    sibling_count: to_u8(new_group_size - 1)?,
+                    siblings,
+                };
+            }
+
+            let mid = if tree_level == 0 {
+                level.hashes[boundary_pos]
+            } else {
+                new_boundary_hash
+            };
+            let child_count = boundary_pos + 1 + new_only;
+            new_boundary_hash = if child_count == 1 {
+                mid
+            } else {
+                let mut children = [[0u8; 32]; N];
+                children[..boundary_pos].copy_from_slice(&level.hashes[..boundary_pos]);
+                children[boundary_pos] = mid;
+                children[boundary_pos + 1..child_count]
+                    .copy_from_slice(&level.hashes[shared..shared + new_only]);
+                hasher.hash_children(&children[..child_count])
+            };
+
+            member_idx /= N;
+            old_level_size = old_level_size.div_ceil(N);
+        }
+
+        Ok(NaryProof {
+            root: self.new_root,
+            leaf: old_proof.leaf,
+            leaf_index: old_proof.leaf_index,
+            level_count: self.level_count,
+            levels: new_levels,
+        })
+    }
+}
+
 impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
     /// Generate an inclusion proof for the leaf at `leaf_index`
     pub fn generate_proof(
@@ -88,7 +318,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
             });
         }
 
-        let idx = usize::try_from(leaf_index).map_err(|_| TreeError::CapacityExceeded)?;
+        let idx = to_usize(leaf_index)?;
         let mut index = idx;
         let mut levels = [ProofLevel::<N>::EMPTY; MAX_DEPTH];
 
@@ -99,31 +329,21 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
             let group_end = core::cmp::min(group_start + N, self.levels[level].len());
             let group_size = group_end - group_start;
 
-            if group_size == 1 {
-                levels[level] = ProofLevel {
-                    position: 0,
-                    sibling_count: 0,
-                    siblings: [[0u8; 32]; N],
-                };
-            } else {
-                let mut group = [[0u8; 32]; N];
-                self.levels[level].get_group(group_start, group_size, &mut group);
-                let mut siblings = [[0u8; 32]; N];
-                let mut sib_idx = 0usize;
-                for i in 0..group_size {
-                    if i != child_pos {
-                        siblings[sib_idx] = group[i];
-                        sib_idx += 1;
-                    }
+            let mut group = [[0u8; 32]; N];
+            self.levels[level].get_group(group_start, group_size, &mut group);
+            let mut siblings = [[0u8; 32]; N];
+            let mut sib_idx = 0usize;
+            for i in 0..group_size {
+                if i != child_pos {
+                    siblings[sib_idx] = group[i];
+                    sib_idx += 1;
                 }
-                levels[level] = ProofLevel {
-                    position: u8::try_from(child_pos)
-                        .map_err(|_| TreeError::MathError)?,
-                    sibling_count: u8::try_from(sib_idx)
-                        .map_err(|_| TreeError::MathError)?,
-                    siblings,
-                };
             }
+            levels[level] = ProofLevel {
+                position: to_u8(child_pos)?,
+                sibling_count: to_u8(sib_idx)?,
+                siblings,
+            };
 
             index /= N;
         }
@@ -133,6 +353,81 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
             leaf: self.levels[0].get(idx)?,
             leaf_index,
             level_count: self.depth,
+            levels,
+        })
+    }
+
+    /// Generate a consistency proof proving the tree at `old_size` is a prefix
+    /// of the current tree
+    pub fn generate_consistency_proof(
+        &self,
+        old_size: u64,
+        old_root: Hash,
+    ) -> Result<ConsistencyProof<N, MAX_DEPTH>, TreeError> {
+        if old_size == 0 || self.size == 0 || old_size > self.size {
+            return Err(TreeError::IndexOutOfRange {
+                index: old_size,
+                size: self.size,
+            });
+        }
+
+        let new_root = self.root.expect("size > 0; qed");
+        let mut levels = [ConsistencyLevel::<N>::EMPTY; MAX_DEPTH];
+
+        if old_size == self.size {
+            return Ok(ConsistencyProof {
+                old_root,
+                new_root,
+                old_size,
+                new_size: self.size,
+                level_count: 0,
+                levels,
+            });
+        }
+
+        let mut old_level_size = to_usize(old_size)?;
+        let mut new_level_size = to_usize(self.size)?;
+        let mut depth = 0usize;
+
+        while old_level_size > 1 || new_level_size > 1 {
+            if depth >= MAX_DEPTH {
+                return Err(TreeError::MathError);
+            }
+
+            let boundary = old_level_size - 1;
+            let boundary_pos = boundary % N;
+            let group_start = boundary - boundary_pos;
+            let shared = if depth == 0 {
+                boundary_pos + 1
+            } else {
+                boundary_pos
+            };
+            let new_count = new_level_size.min(group_start + N) - boundary - 1;
+
+            let mut hashes = [[0u8; 32]; N];
+            self.levels[depth].get_group(group_start, shared, &mut hashes[..shared]);
+            self.levels[depth].get_group(
+                boundary + 1,
+                new_count,
+                &mut hashes[shared..shared + new_count],
+            );
+            levels[depth] = ConsistencyLevel {
+                shared_count: to_u8(shared)?,
+                new_count: to_u8(new_count)?,
+                hashes,
+            };
+
+            depth += 1;
+            old_level_size = old_level_size.div_ceil(N);
+            new_level_size = new_level_size.div_ceil(N);
+        }
+
+        Ok(ConsistencyProof {
+            old_root,
+            new_root,
+            old_size,
+            new_size: self.size,
+            level_count: depth,
             levels,
         })
     }
@@ -170,6 +465,82 @@ mod tests {
         h
     }
 
+    fn build_snapshots<const N: usize, const MAX_DEPTH: usize>(
+        leaves: &[Hash],
+    ) -> Vec<(u64, Hash, TreeSnapshot<N, MAX_DEPTH>)> {
+        let mut tree = LeanIMT::<XorHasher, N, MAX_DEPTH>::new(XorHasher);
+        let mut snapshots = Vec::new();
+        for &l in leaves {
+            tree.insert(l).unwrap();
+            let snap = tree.snapshot();
+            let root = snap.root().unwrap();
+            let size = snap.size();
+            snapshots.push((size, root, snap));
+        }
+        snapshots
+    }
+
+    /// Verify generate + verify for every (old, new) pair up to `count` leaves.
+    fn verify_consistency_all_pairs<const N: usize>(count: u8) {
+        let leaves: Vec<Hash> = (1..=count).map(leaf).collect();
+        let snaps = build_snapshots::<N, 32>(&leaves);
+        for i in 0..snaps.len() {
+            for j in i..snaps.len() {
+                let proof = snaps[j]
+                    .2
+                    .generate_consistency_proof(snaps[i].0, snaps[i].1)
+                    .unwrap();
+                assert!(
+                    proof.verify(&XorHasher).unwrap(),
+                    "N={} consistency failed for {} -> {}",
+                    N,
+                    i + 1,
+                    j + 1
+                );
+            }
+        }
+    }
+
+    /// Verify update_inclusion_proof for every (old, new, member) triple,
+    /// and assert the result equals a freshly generated proof.
+    fn verify_update_all_pairs<const N: usize>(count: u8) {
+        let leaves: Vec<Hash> = (1..=count).map(leaf).collect();
+        let snaps = build_snapshots::<N, 32>(&leaves);
+        for i in 0..snaps.len() {
+            for j in i..snaps.len() {
+                let cp = snaps[j]
+                    .2
+                    .generate_consistency_proof(snaps[i].0, snaps[i].1)
+                    .unwrap();
+                for m in 0..=i {
+                    let old_ip = snaps[i].2.generate_proof(m as u64).unwrap();
+                    let updated = cp.update_inclusion_proof(&old_ip, &XorHasher).unwrap();
+                    assert!(
+                        updated.verify(&XorHasher).unwrap(),
+                        "N={} update failed: member {} from {} -> {}",
+                        N,
+                        m,
+                        i + 1,
+                        j + 1,
+                    );
+                    assert_eq!(updated.root, snaps[j].1);
+                    assert_eq!(updated.leaf, old_ip.leaf);
+                    assert_eq!(updated.leaf_index, old_ip.leaf_index);
+                    let fresh = snaps[j].2.generate_proof(m as u64).unwrap();
+                    assert_eq!(
+                        updated,
+                        fresh,
+                        "N={} update mismatch: member {} from {} -> {}",
+                        N,
+                        m,
+                        i + 1,
+                        j + 1,
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn proof_single_leaf() {
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
@@ -181,7 +552,7 @@ mod tests {
         assert_eq!(proof.leaf, l);
         assert_eq!(proof.root, l);
         assert_eq!(proof.leaf_index, 0);
-        assert_eq!(proof.level_count, 0); // depth=0
+        assert_eq!(proof.level_count, 0);
         assert!(proof.verify(&XorHasher).unwrap());
     }
 
@@ -350,59 +721,213 @@ mod tests {
     }
 
     #[cfg(feature = "wincode")]
-    #[test]
-    fn wincode_round_trip_binary() {
-        let h = XorHasher;
-        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
-        for i in 1..=10u8 {
-            tree.insert(leaf(i)).unwrap();
+    fn verify_wincode_proof_round_trip<const N: usize>(count: u8) {
+        let leaves: Vec<Hash> = (1..=count).map(leaf).collect();
+        let mut tree = LeanIMT::<XorHasher, N, 32>::new(XorHasher);
+        for &l in &leaves {
+            tree.insert(l).unwrap();
         }
         let snap = tree.snapshot();
-
-        for i in 0..10u64 {
+        for i in 0..count as u64 {
             let proof = snap.generate_proof(i).unwrap();
             let bytes = wincode::serialize(&proof).unwrap();
-            let decoded: NaryProof<2, 32> = wincode::deserialize(&bytes).unwrap();
+            let decoded: NaryProof<N, 32> = wincode::deserialize(&bytes).unwrap();
             assert_eq!(decoded, proof);
-            assert!(decoded.verify(&h).unwrap());
+            assert!(decoded.verify(&XorHasher).unwrap());
         }
+    }
+
+    #[cfg(feature = "wincode")]
+    #[test]
+    fn wincode_round_trip_binary() {
+        verify_wincode_proof_round_trip::<2>(10);
     }
 
     #[cfg(feature = "wincode")]
     #[test]
     fn wincode_round_trip_ternary() {
-        let h = XorHasher;
-        let mut tree = LeanIMT::<XorHasher, 3, 32>::new(h.clone());
-        for i in 1..=10u8 {
-            tree.insert(leaf(i)).unwrap();
-        }
-        let snap = tree.snapshot();
-
-        for i in 0..10u64 {
-            let proof = snap.generate_proof(i).unwrap();
-            let bytes = wincode::serialize(&proof).unwrap();
-            let decoded: NaryProof<3, 32> = wincode::deserialize(&bytes).unwrap();
-            assert_eq!(decoded, proof);
-            assert!(decoded.verify(&h).unwrap());
-        }
+        verify_wincode_proof_round_trip::<3>(10);
     }
 
     #[cfg(feature = "wincode")]
     #[test]
     fn wincode_round_trip_quaternary() {
-        let h = XorHasher;
-        let mut tree = LeanIMT::<XorHasher, 4, 32>::new(h.clone());
-        for i in 1..=10u8 {
-            tree.insert(leaf(i)).unwrap();
-        }
-        let snap = tree.snapshot();
+        verify_wincode_proof_round_trip::<4>(10);
+    }
 
-        for i in 0..10u64 {
-            let proof = snap.generate_proof(i).unwrap();
-            let bytes = wincode::serialize(&proof).unwrap();
-            let decoded: NaryProof<4, 32> = wincode::deserialize(&bytes).unwrap();
-            assert_eq!(decoded, proof);
-            assert!(decoded.verify(&h).unwrap());
+    #[test]
+    fn consistency_same_size_trivial() {
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        tree.insert(leaf(1)).unwrap();
+        tree.insert(leaf(2)).unwrap();
+        let snap = tree.snapshot();
+        let root = snap.root().unwrap();
+        let proof = snap.generate_consistency_proof(2, root).unwrap();
+        assert_eq!(proof.level_count, 0);
+        assert!(proof.verify(&XorHasher).unwrap());
+    }
+
+    #[test]
+    fn consistency_binary_all_pairs_small() {
+        verify_consistency_all_pairs::<2>(8);
+    }
+
+    #[test]
+    fn consistency_ternary_all_pairs_small() {
+        verify_consistency_all_pairs::<3>(9);
+    }
+
+    #[test]
+    fn consistency_quaternary_all_pairs_small() {
+        verify_consistency_all_pairs::<4>(8);
+    }
+
+    #[test]
+    fn consistency_rejects_wrong_old_root() {
+        let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
+        let snaps = build_snapshots::<2, 32>(&leaves);
+        let proof = snaps[3]
+            .2
+            .generate_consistency_proof(snaps[1].0, snaps[1].1)
+            .unwrap();
+        let mut tampered = proof;
+        tampered.old_root = [0xFF; 32];
+        assert!(!tampered.verify(&XorHasher).unwrap());
+    }
+
+    #[test]
+    fn consistency_rejects_wrong_new_root() {
+        let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
+        let snaps = build_snapshots::<2, 32>(&leaves);
+        let proof = snaps[3]
+            .2
+            .generate_consistency_proof(snaps[1].0, snaps[1].1)
+            .unwrap();
+        let mut tampered = proof;
+        tampered.new_root = [0xFF; 32];
+        assert!(!tampered.verify(&XorHasher).unwrap());
+    }
+
+    #[test]
+    fn consistency_rejects_tampered_hash() {
+        let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
+        let snaps = build_snapshots::<2, 32>(&leaves);
+        let proof = snaps[3]
+            .2
+            .generate_consistency_proof(snaps[1].0, snaps[1].1)
+            .unwrap();
+        let mut tampered = proof;
+        if tampered.level_count > 0 {
+            tampered.levels[0].hashes[0] = [0xFF; 32];
         }
+        assert!(!tampered.verify(&XorHasher).unwrap());
+    }
+
+    #[test]
+    fn consistency_rejects_invalid_sizes() {
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        tree.insert(leaf(1)).unwrap();
+        let snap = tree.snapshot();
+        assert!(snap.generate_consistency_proof(0, [0u8; 32]).is_err());
+        assert!(snap.generate_consistency_proof(2, [0u8; 32]).is_err());
+    }
+
+    #[test]
+    fn consistency_verify_rejects_zero_sizes() {
+        let proof = ConsistencyProof::<2, 32> {
+            old_root: [0u8; 32],
+            new_root: [0u8; 32],
+            old_size: 0,
+            new_size: 1,
+            level_count: 0,
+            levels: [ConsistencyLevel::EMPTY; 32],
+        };
+        assert!(proof.verify(&XorHasher).is_err());
+    }
+
+    #[test]
+    fn consistency_verify_rejects_old_gt_new() {
+        let proof = ConsistencyProof::<2, 32> {
+            old_root: [0u8; 32],
+            new_root: [0u8; 32],
+            old_size: 5,
+            new_size: 3,
+            level_count: 0,
+            levels: [ConsistencyLevel::EMPTY; 32],
+        };
+        assert!(proof.verify(&XorHasher).is_err());
+    }
+
+    #[test]
+    fn update_same_size() {
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        tree.insert(leaf(1)).unwrap();
+        tree.insert(leaf(2)).unwrap();
+        let snap = tree.snapshot();
+        let root = snap.root().unwrap();
+        let cp = snap.generate_consistency_proof(2, root).unwrap();
+        let ip = snap.generate_proof(0).unwrap();
+        let updated = cp.update_inclusion_proof(&ip, &XorHasher).unwrap();
+        assert_eq!(updated, ip);
+    }
+
+    #[test]
+    fn update_binary_all_pairs() {
+        verify_update_all_pairs::<2>(8);
+    }
+
+    #[test]
+    fn update_ternary_all_pairs() {
+        verify_update_all_pairs::<3>(9);
+    }
+
+    #[test]
+    fn update_quaternary_all_pairs() {
+        verify_update_all_pairs::<4>(8);
+    }
+
+    #[test]
+    fn update_rejects_wrong_root() {
+        let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
+        let snaps = build_snapshots::<2, 32>(&leaves);
+        let cp = snaps[3]
+            .2
+            .generate_consistency_proof(snaps[1].0, snaps[1].1)
+            .unwrap();
+        let mut bad_proof = snaps[1].2.generate_proof(0).unwrap();
+        bad_proof.root = [0xFF; 32];
+        assert!(cp.update_inclusion_proof(&bad_proof, &XorHasher).is_err());
+    }
+
+    #[cfg(feature = "wincode")]
+    fn verify_wincode_consistency_round_trip<const N: usize>() {
+        let leaves: Vec<Hash> = (1..=6).map(leaf).collect();
+        let snaps = build_snapshots::<N, 32>(&leaves);
+        let proof = snaps[5]
+            .2
+            .generate_consistency_proof(snaps[2].0, snaps[2].1)
+            .unwrap();
+        let bytes = wincode::serialize(&proof).unwrap();
+        let decoded: ConsistencyProof<N, 32> = wincode::deserialize(&bytes).unwrap();
+        assert_eq!(decoded, proof);
+        assert!(decoded.verify(&XorHasher).unwrap());
+    }
+
+    #[cfg(feature = "wincode")]
+    #[test]
+    fn consistency_wincode_binary() {
+        verify_wincode_consistency_round_trip::<2>();
+    }
+
+    #[cfg(feature = "wincode")]
+    #[test]
+    fn consistency_wincode_ternary() {
+        verify_wincode_consistency_round_trip::<3>();
+    }
+
+    #[cfg(feature = "wincode")]
+    #[test]
+    fn consistency_wincode_quaternary() {
+        verify_wincode_consistency_round_trip::<4>();
     }
 }

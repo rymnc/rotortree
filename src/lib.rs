@@ -39,6 +39,8 @@ pub use hash::{
     Hasher,
 };
 pub use proof::{
+    ConsistencyLevel,
+    ConsistencyProof,
     NaryProof,
     ProofLevel,
 };
