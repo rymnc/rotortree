@@ -64,6 +64,10 @@ required-features = ["storage"]
 name = "bulk_load"
 required-features = ["storage", "parallel", "blake3"]
 
+[[example]]
+name = "light_client"
+required-features = ["storage", "blake3"]
+
 [profile.release]
 lto = "fat"
 codegen-units = 1
