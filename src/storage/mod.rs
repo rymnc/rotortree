@@ -423,9 +423,13 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
             .truncate(false)
             .open(&wal_path)?;
 
-        use fs2::FileExt;
-        file.try_lock_exclusive()
-            .map_err(|_| StorageError::FileLocked)?;
+        use fs4::fs_std::FileExt;
+        if !file
+            .try_lock_exclusive()
+            .map_err(|_| StorageError::FileLocked)?
+        {
+            return Err(StorageError::FileLocked.into());
+        }
 
         if file.metadata()?.len() == 0
             && let Some(parent) = wal_path.parent()
@@ -659,7 +663,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
 
         {
             let file = self.shared.wal_file.lock();
-            let _ = fs2::FileExt::unlock(&*file);
+            let _ = fs4::fs_std::FileExt::unlock(&*file);
         }
 
         Ok(())
@@ -806,7 +810,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Drop
                 let _ = handle.handle.join();
             }
             if let Some(file) = self.shared.wal_file.try_lock() {
-                let _ = fs2::FileExt::unlock(&*file);
+                let _ = fs4::fs_std::FileExt::unlock(&*file);
             }
             return;
         }
