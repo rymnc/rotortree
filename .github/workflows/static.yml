@@ -47,7 +47,7 @@ jobs:
 
       - name: Assemble site
         run: |
-          mkdir -p _site/benchmarks _site/viz _site/differ
+          mkdir -p _site/benchmarks _site/viz _site/differ _site/model
           cp assets/index.html _site/
           cp assets/benchmarks/* _site/benchmarks/
           cp assets/differ/* _site/differ/
