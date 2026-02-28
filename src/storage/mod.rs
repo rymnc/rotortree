@@ -96,7 +96,6 @@ struct CheckpointSnap {
     leaf_count: u64,
     last_seq: u64,
     root_hash: Hash,
-    active_levels: usize,
     level_data: Vec<LevelCheckpointData>,
 }
 
@@ -194,19 +193,28 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
         Ok(())
     }
 
+    fn flush_buffer_locked(
+        &self,
+        mut wal_file: &std::fs::File,
+        state: &mut DurableState<N, MAX_DEPTH>,
+    ) -> Result<(), StorageError> {
+        if !state.buffer.is_empty() {
+            wal_file.write_all(&state.buffer)?;
+            wal_file.sync_data()?;
+            self.durability
+                .mark_flushed(state.next_seq.saturating_sub(1));
+            state.buffer.clear();
+        }
+        Ok(())
+    }
+
     fn checkpoint_inner(&self) -> Result<(), StorageError> {
         let mut wal_file = self.wal_file.lock();
 
         let snap = {
             let mut state = self.state.lock();
 
-            if !state.buffer.is_empty() {
-                (&*wal_file).write_all(&state.buffer)?;
-                wal_file.sync_data()?;
-                self.durability
-                    .mark_flushed(state.next_seq.saturating_sub(1));
-                state.buffer.clear();
-            }
+            self.flush_buffer_locked(&wal_file, &mut state)?;
 
             let depth = state.inner.depth;
             let leaf_count = state.inner.size;
@@ -247,19 +255,15 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
                 leaf_count,
                 last_seq,
                 root_hash,
-                active_levels,
                 level_data,
             }
         };
 
         std::fs::create_dir_all(&self.data_dir)?;
-        if !self.data_dir.join("header.bin").exists() {
-            #[allow(clippy::cast_possible_truncation)]
-            checkpoint::write_header(&self.data_dir, N as u32, MAX_DEPTH as u32)?;
-        }
+        #[allow(clippy::cast_possible_truncation)]
+        checkpoint::write_header(&self.data_dir, N as u32, MAX_DEPTH as u32)?;
 
-        let mut level_file_handles: Vec<Option<std::fs::File>> =
-            (0..snap.active_levels).map(|_| None).collect();
+        let mut files_to_sync = Vec::new();
 
         for (level_idx, ld) in snap.level_data.iter().enumerate() {
             if !ld.new_chunks.is_empty() {
@@ -270,11 +274,11 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
                     ld.from_chunk,
                     chunks_iter,
                 )?;
-                level_file_handles[level_idx] = Some(file);
+                files_to_sync.push(file);
             }
         }
 
-        for file in level_file_handles.into_iter().flatten() {
+        for file in &files_to_sync {
             file.sync_data()?;
         }
 
@@ -298,9 +302,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
         {
             let mut state = self.state.lock();
 
-            while state.checkpointed_chunks.len() < snap.active_levels {
-                state.checkpointed_chunks.push(0);
-            }
+            state.checkpointed_chunks.resize(snap.level_data.len(), 0);
 
             for (level_idx, ld) in snap.level_data.iter().enumerate() {
                 let snapshot_total = ld.total_chunks;
@@ -333,13 +335,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
             self.entries_since_checkpoint.store(0, Ordering::Relaxed);
             self.uncheckpointed_memory_bytes.store(0, Ordering::Relaxed);
 
-            if !state.buffer.is_empty() {
-                (&*wal_file).write_all(&state.buffer)?;
-                wal_file.sync_data()?;
-                self.durability
-                    .mark_flushed(state.next_seq.saturating_sub(1));
-                state.buffer.clear();
-            }
+            self.flush_buffer_locked(&wal_file, &mut state)?;
 
             let new_snap = state.inner.snapshot();
             self.snapshot.store(Arc::new(new_snap));

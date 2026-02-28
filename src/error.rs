@@ -1,7 +1,7 @@
 use core::fmt;
 
 /// Errors produced by tree operations.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum TreeError {
     /// The tree would exceed its compile-time maximum depth.
     MaxDepthExceeded { max_depth: usize },
@@ -13,6 +13,8 @@ pub enum TreeError {
     CapacityExceeded,
     /// Math error
     MathError,
+    /// The proof update is a no-op (old_size == new_size)
+    NoUpdateNeeded,
 }
 
 impl fmt::Display for TreeError {
@@ -44,6 +46,9 @@ impl fmt::Display for TreeError {
             }
             Self::MathError => {
                 write!(f, "math error")
+            }
+            Self::NoUpdateNeeded => {
+                write!(f, "proof update is a no-op (same size)")
             }
         }
     }

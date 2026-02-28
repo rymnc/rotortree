@@ -169,6 +169,11 @@ fn gen_consistency_proof_update(n_values: Vec<usize>) {
                             .generate_consistency_proof(snaps[i].0, snaps[i].1)
                             .unwrap();
                         let old_ip = snaps[i].2.generate_proof(0).unwrap();
+                        if i == last {
+                            let err = cp.update_inclusion_proof(&old_ip, &XorHasher).unwrap_err();
+                            prop_assert_eq!(err, rotortree::TreeError::NoUpdateNeeded);
+                            continue;
+                        }
                         let updated = cp.update_inclusion_proof(&old_ip, &XorHasher).unwrap();
                         let fresh = snaps[last].2.generate_proof(0).unwrap();
                         prop_assert_eq!(updated, fresh,

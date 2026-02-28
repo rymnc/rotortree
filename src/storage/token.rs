@@ -6,7 +6,6 @@ use parking_lot::{
 };
 
 /// Shared state for tracking the last durably flushed WAL sequence number
-#[derive(Clone)]
 pub(crate) struct DurabilityTracker {
     inner: Arc<(Mutex<Option<u64>>, Condvar)>,
 }

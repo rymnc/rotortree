@@ -1,3 +1,5 @@
+#![cfg_attr(feature = "concurrent", allow(unused_mut))]
+
 //! Full-node / light-client consistency proof demo.
 //!
 //! Two threads communicate over `mpsc` channels:
@@ -141,12 +143,15 @@ fn light_client(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<NodeMessage>
                 assert!(proof.verify(&hasher).unwrap());
 
                 current_root = snap.root();
-                tracked_proof = Some(proof);
                 println!(
                     "  [light client] bootstrap: {} leaves, proof OK",
                     leaves.len()
                 );
-                tx.send(ClientMessage::InclusionProof(proof)).unwrap();
+                let send_proof = snap
+                    .generate_proof(TRACKED_LEAF)
+                    .expect("generate_proof failed");
+                tracked_proof = Some(proof);
+                tx.send(ClientMessage::InclusionProof(send_proof)).unwrap();
             }
 
             NodeMessage::Update { consistency_proof } => {
@@ -162,14 +167,16 @@ fn light_client(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<NodeMessage>
                 assert_eq!(updated_proof.root, consistency_proof.new_root);
 
                 current_root = Some(consistency_proof.new_root);
-                tracked_proof = Some(updated_proof);
                 println!(
                     "  [light client] update: consistency OK, proof updated \
                      (old_size={}, new_size={})",
                     consistency_proof.old_size, consistency_proof.new_size,
                 );
-                tx.send(ClientMessage::InclusionProof(updated_proof))
-                    .unwrap();
+                let send_proof = consistency_proof
+                    .update_inclusion_proof(old_proof, &hasher)
+                    .expect("update_inclusion_proof failed");
+                tracked_proof = Some(updated_proof);
+                tx.send(ClientMessage::InclusionProof(send_proof)).unwrap();
             }
 
             NodeMessage::Shutdown => {

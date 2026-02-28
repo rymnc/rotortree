@@ -62,7 +62,7 @@ impl Default for TieringConfig {
 }
 
 /// Versioned header written once at data directory creation
-#[derive(Debug, Clone, wincode::SchemaWrite, wincode::SchemaRead)]
+#[derive(Debug, wincode::SchemaWrite, wincode::SchemaRead)]
 enum HeaderFrame {
     V1 {
         magic: [u8; 4],
@@ -73,7 +73,7 @@ enum HeaderFrame {
 }
 
 /// Versioned checkpoint metadata (atomically written at each checkpoint)
-#[derive(Debug, Clone, wincode::SchemaWrite, wincode::SchemaRead)]
+#[derive(Debug, wincode::SchemaWrite, wincode::SchemaRead)]
 enum MetaFrame {
     V1 {
         magic: [u8; 4],
@@ -116,11 +116,7 @@ pub(crate) fn write_header(data_dir: &Path, n: u32, max_depth: u32) -> io::Resul
         chunk_size: CHUNK_SIZE as u32,
     };
     let buf = frame::serialize_frame(&header);
-    let path = data_dir.join("header.bin");
-    let mut file = fs::File::create(&path)?;
-    file.write_all(&buf)?;
-    file.sync_all()?;
-    Ok(())
+    atomic_write(&data_dir.join("header.bin"), &buf)
 }
 
 /// Read and validate `header.bin`. Returns `None` if missing or corrupt
@@ -207,11 +203,7 @@ pub(crate) fn write_tails(
 
     for (i, tail) in tails.iter().enumerate() {
         let base = i * CHUNK_BYTE_SIZE;
-        let tail_bytes = tail.len() * 32;
-        // SAFETY: tail is &[Hash] where Hash is [u8; 32], so this is a flat byte view
-        let src =
-            unsafe { std::slice::from_raw_parts(tail.as_ptr() as *const u8, tail_bytes) };
-        buf[base..base + tail_bytes].copy_from_slice(src);
+        buf[base..base + CHUNK_BYTE_SIZE].copy_from_slice(tail.as_flattened());
     }
 
     atomic_write(&data_dir.join("tails.bin"), &buf)
@@ -237,9 +229,8 @@ pub(crate) fn read_tails(
     for i in 0..max_depth {
         let base = i * CHUNK_BYTE_SIZE;
         let chunk = &data[base..base + CHUNK_BYTE_SIZE];
-        // SAFETY: CHUNK_BYTE_SIZE == CHUNK_SIZE * 32, so chunk is exactly [[u8; 32]; CHUNK_SIZE]
-        let tail: [[u8; 32]; CHUNK_SIZE] =
-            unsafe { chunk.as_ptr().cast::<[[u8; 32]; CHUNK_SIZE]>().read() };
+        let mut tail = [[0u8; 32]; CHUNK_SIZE];
+        tail.as_flattened_mut().copy_from_slice(chunk);
         tails.push(tail);
     }
 

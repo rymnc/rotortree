@@ -5,7 +5,7 @@ use std::{
 
 use crate::TreeError;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) enum BackgroundError {
     FlushFailed(Arc<std::io::Error>),
     CheckpointFailed(String),

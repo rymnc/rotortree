@@ -2,12 +2,11 @@ use crate::{
     Hash,
     Hasher,
     TreeError,
-    tree::TreeSnapshot,
+    tree::{
+        TreeSnapshot,
+        u64_to_usize,
+    },
 };
-
-fn to_usize(v: u64) -> Result<usize, TreeError> {
-    usize::try_from(v).map_err(|_| TreeError::MathError)
-}
 
 fn to_u8(v: usize) -> Result<u8, TreeError> {
     u8::try_from(v).map_err(|_| TreeError::MathError)
@@ -17,7 +16,7 @@ fn to_u8(v: usize) -> Result<u8, TreeError> {
 ///
 /// Uses a fixed-size `[Hash; N]` array (at most `N-1` siblings
 /// are valid, indicated by `sibling_count`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
 pub struct ProofLevel<const N: usize> {
     /// Child position within the group (`0..N-1`)
@@ -37,7 +36,7 @@ impl<const N: usize> ProofLevel<N> {
 }
 
 /// An N-ary Merkle inclusion proof
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
 pub struct NaryProof<const N: usize, const MAX_DEPTH: usize> {
     /// The Merkle root this proof verifies against
@@ -60,6 +59,7 @@ impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
         }
 
         let mut current = self.leaf;
+        let mut children = [[0u8; 32]; N];
 
         for level in &self.levels[..self.level_count] {
             if level.sibling_count == 0 {
@@ -71,7 +71,6 @@ impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
             if total > N || pos >= total {
                 return Err(TreeError::MathError);
             }
-            let mut children = [[0u8; 32]; N];
             children[..pos].copy_from_slice(&level.siblings[..pos]);
             children[pos] = current;
             let rest = total - pos - 1;
@@ -84,7 +83,7 @@ impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
 }
 
 /// Per-level data in a consistency proof
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
 pub struct ConsistencyLevel<const N: usize> {
     /// Number of shared (left) siblings in `hashes`
@@ -101,13 +100,19 @@ impl<const N: usize> ConsistencyLevel<N> {
         new_count: 0,
         hashes: [[0u8; 32]; N],
     };
+
+    fn new_hashes(&self) -> &[Hash] {
+        let sc = self.shared_count as usize;
+        let nc = self.new_count as usize;
+        &self.hashes[sc..sc + nc]
+    }
 }
 
 /// Consistency proof
 ///
 /// Proves that a tree of `old_size` leaves is a prefix of a tree of
 /// `new_size` leaves
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
 pub struct ConsistencyProof<const N: usize, const MAX_DEPTH: usize> {
     /// Root of the old (smaller) tree
@@ -144,9 +149,10 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
             return Ok(false);
         }
 
-        let mut old_level_size = to_usize(self.old_size)?;
+        let mut old_level_size = u64_to_usize(self.old_size)?;
         let mut old_hash = [0u8; 32];
         let mut new_hash = [0u8; 32];
+        let mut children = [[0u8; 32]; N];
 
         for (i, level) in self.levels[..self.level_count].iter().enumerate() {
             let shared = level.shared_count as usize;
@@ -169,7 +175,6 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
             };
 
             let new_child_count = boundary_pos + 1 + new_only;
-            let mut children = [[0u8; 32]; N];
             children[..boundary_pos].copy_from_slice(&level.hashes[..boundary_pos]);
             children[boundary_pos] = old_mid;
             old_hash = if boundary_pos > 0 {
@@ -179,7 +184,7 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
             };
             children[boundary_pos] = new_mid;
             children[boundary_pos + 1..new_child_count]
-                .copy_from_slice(&level.hashes[shared..shared + new_only]);
+                .copy_from_slice(level.new_hashes());
             new_hash = if new_child_count > 1 {
                 hasher.hash_children(&children[..new_child_count])
             } else {
@@ -213,25 +218,30 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
         }
 
         if self.old_size == self.new_size {
-            return Ok(*old_proof);
+            return Err(TreeError::NoUpdateNeeded);
         }
 
-        let mut new_levels = [ProofLevel::<N>::EMPTY; MAX_DEPTH];
-        let mut old_level_size = to_usize(self.old_size)?;
-        let mut member_idx = to_usize(old_proof.leaf_index)?;
+        let mut new_levels = core::array::from_fn(|_| ProofLevel::<N>::EMPTY);
+        let mut old_level_size = u64_to_usize(self.old_size)?;
+        let mut member_idx = u64_to_usize(old_proof.leaf_index)?;
         let mut new_boundary_hash = [0u8; 32];
+        let mut children = [[0u8; 32]; N];
 
         for (tree_level, level) in self.levels[..self.level_count].iter().enumerate() {
             let boundary = old_level_size - 1;
             let boundary_pos = boundary % N;
             let member_pos = member_idx % N;
 
-            let shared = level.shared_count as usize;
             let new_only = level.new_count as usize;
 
             if member_idx / N != boundary / N {
                 if tree_level < old_proof.level_count {
-                    new_levels[tree_level] = old_proof.levels[tree_level];
+                    let src = &old_proof.levels[tree_level];
+                    new_levels[tree_level] = ProofLevel {
+                        position: src.position,
+                        sibling_count: src.sibling_count,
+                        siblings: src.siblings,
+                    };
                 }
             } else {
                 let mut group = [[0u8; 32]; N];
@@ -257,7 +267,7 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
                 let new_group_size = old_group_size + new_only;
                 if new_only > 0 {
                     group[old_group_size..new_group_size]
-                        .copy_from_slice(&level.hashes[shared..shared + new_only]);
+                        .copy_from_slice(level.new_hashes());
                 }
 
                 let mut siblings = [[0u8; 32]; N];
@@ -283,11 +293,10 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
             new_boundary_hash = if child_count == 1 {
                 mid
             } else {
-                let mut children = [[0u8; 32]; N];
                 children[..boundary_pos].copy_from_slice(&level.hashes[..boundary_pos]);
                 children[boundary_pos] = mid;
                 children[boundary_pos + 1..child_count]
-                    .copy_from_slice(&level.hashes[shared..shared + new_only]);
+                    .copy_from_slice(level.new_hashes());
                 hasher.hash_children(&children[..child_count])
             };
 
@@ -318,9 +327,9 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
             });
         }
 
-        let idx = to_usize(leaf_index)?;
-        let mut index = idx;
-        let mut levels = [ProofLevel::<N>::EMPTY; MAX_DEPTH];
+        let leaf_idx = u64_to_usize(leaf_index)?;
+        let mut index = leaf_idx;
+        let mut levels = core::array::from_fn(|_| ProofLevel::<N>::EMPTY);
 
         #[allow(clippy::needless_range_loop)]
         for level in 0..self.depth {
@@ -350,7 +359,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
 
         Ok(NaryProof {
             root: self.root.expect("set prev; qed"),
-            leaf: self.levels[0].get(idx)?,
+            leaf: self.levels[0].get(leaf_idx)?,
             leaf_index,
             level_count: self.depth,
             levels,
@@ -372,7 +381,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
         }
 
         let new_root = self.root.expect("size > 0; qed");
-        let mut levels = [ConsistencyLevel::<N>::EMPTY; MAX_DEPTH];
+        let mut levels = core::array::from_fn(|_| ConsistencyLevel::<N>::EMPTY);
 
         if old_size == self.size {
             return Ok(ConsistencyProof {
@@ -385,8 +394,8 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
             });
         }
 
-        let mut old_level_size = to_usize(old_size)?;
-        let mut new_level_size = to_usize(self.size)?;
+        let mut old_level_size = u64_to_usize(old_size)?;
+        let mut new_level_size = u64_to_usize(self.size)?;
         let mut depth = 0usize;
 
         while old_level_size > 1 || new_level_size > 1 {
@@ -512,6 +521,13 @@ mod tests {
                     .2
                     .generate_consistency_proof(snaps[i].0, snaps[i].1)
                     .unwrap();
+                if i == j {
+                    // Same-size update returns NoUpdateNeeded
+                    let ip = snaps[i].2.generate_proof(0).unwrap();
+                    let err = cp.update_inclusion_proof(&ip, &XorHasher).unwrap_err();
+                    assert_eq!(err, TreeError::NoUpdateNeeded);
+                    continue;
+                }
                 for m in 0..=i {
                     let old_ip = snaps[i].2.generate_proof(m as u64).unwrap();
                     let updated = cp.update_inclusion_proof(&old_ip, &XorHasher).unwrap();
@@ -840,7 +856,7 @@ mod tests {
             old_size: 0,
             new_size: 1,
             level_count: 0,
-            levels: [ConsistencyLevel::EMPTY; 32],
+            levels: core::array::from_fn(|_| ConsistencyLevel::EMPTY),
         };
         assert!(proof.verify(&XorHasher).is_err());
     }
@@ -853,7 +869,7 @@ mod tests {
             old_size: 5,
             new_size: 3,
             level_count: 0,
-            levels: [ConsistencyLevel::EMPTY; 32],
+            levels: core::array::from_fn(|_| ConsistencyLevel::EMPTY),
         };
         assert!(proof.verify(&XorHasher).is_err());
     }
@@ -867,8 +883,8 @@ mod tests {
         let root = snap.root().unwrap();
         let cp = snap.generate_consistency_proof(2, root).unwrap();
         let ip = snap.generate_proof(0).unwrap();
-        let updated = cp.update_inclusion_proof(&ip, &XorHasher).unwrap();
-        assert_eq!(updated, ip);
+        let err = cp.update_inclusion_proof(&ip, &XorHasher).unwrap_err();
+        assert_eq!(err, TreeError::NoUpdateNeeded);
     }
 
     #[test]

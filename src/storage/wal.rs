@@ -7,7 +7,7 @@ use super::{
 
 pub(crate) const FILE_MAGIC: [u8; 4] = [0x52, 0x4F, 0x54, 0x52];
 
-#[derive(Debug, Clone, PartialEq, Eq, wincode::SchemaWrite, wincode::SchemaRead)]
+#[derive(Debug, wincode::SchemaWrite, wincode::SchemaRead)]
 pub(crate) enum WalHeader {
     V1 {
         magic: [u8; 4],
@@ -17,7 +17,7 @@ pub(crate) enum WalHeader {
 }
 
 /// new cow moo
-#[derive(Debug, Clone, wincode::SchemaWrite, wincode::SchemaRead)]
+#[derive(Debug, wincode::SchemaWrite, wincode::SchemaRead)]
 pub(crate) enum NewCow<'a> {
     Owned(Vec<Hash>),
     Borrowed(&'a [Hash]),
@@ -40,18 +40,18 @@ impl PartialEq for NewCow<'_> {
 
 impl Eq for NewCow<'_> {}
 
-#[derive(Debug, Clone, PartialEq, Eq, wincode::SchemaWrite, wincode::SchemaRead)]
+#[derive(Debug, PartialEq, Eq, wincode::SchemaWrite, wincode::SchemaRead)]
 pub(crate) enum WalEntry<'a> {
     V1(WalEntryV1<'a>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, wincode::SchemaWrite, wincode::SchemaRead)]
+#[derive(Debug, PartialEq, Eq, wincode::SchemaWrite, wincode::SchemaRead)]
 pub(crate) struct WalEntryV1<'a> {
     pub seq: u64,
     pub payload: WalPayload<'a>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, wincode::SchemaWrite, wincode::SchemaRead)]
+#[derive(Debug, PartialEq, Eq, wincode::SchemaWrite, wincode::SchemaRead)]
 pub(crate) enum WalPayload<'a> {
     Single(Hash),
     Batch(NewCow<'a>),

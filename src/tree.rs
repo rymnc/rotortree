@@ -152,7 +152,7 @@ fn ceil_log_n(size: u64, n: usize) -> usize {
 /// Convert `u64` to `usize`, returning `CapacityExceeded` on
 /// failure (relevant on 32-bit platforms).
 #[inline]
-fn u64_to_usize(val: u64) -> Result<usize, TreeError> {
+pub(crate) fn u64_to_usize(val: u64) -> Result<usize, TreeError> {
     usize::try_from(val).map_err(|_| TreeError::CapacityExceeded)
 }
 
