@@ -328,6 +328,8 @@ td.depth-warn {
 
 <script>
 const C = 128n, H = 32n, B = 4096n, S = 256n;
+const CHUNKS_PER_SHARD = 65536n;
+const SHARD_BYTE_SIZE = CHUNKS_PER_SHARD * B; // 256 MB
 const PARETO_NS = [2n, 3n, 4n, 8n, 16n];
 
 function ceilDiv(a, b) {
@@ -372,6 +374,7 @@ function totalMemory(L, N, D) {
 }
 
 function dataFileSize(l) { return (l / C) * B; }
+function shardCount(l) { const chunks = l / C; return chunks === 0n ? 0n : ceilDiv(chunks, CHUNKS_PER_SHARD); }
 
 function totalDisk(L, N, D) {
   const d = treeDepth(L, N);
@@ -615,10 +618,10 @@ function renderPerLevel(L, N, D) {
   const activeMax = d < D ? d : D - 1n;
   let html = '<table><thead><tr>';
   html += '<th>Level</th><th>Nodes</th><th>Full Chunks</th><th>Tail Len</th>';
-  html += '<th>Segments</th><th>Pending</th><th>Memory</th><th>Data File</th>';
+  html += '<th>Segments</th><th>Pending</th><th>Shards</th><th>Memory</th><th>Data Size</th>';
   html += '</tr></thead><tbody>';
 
-  let totalN = 0n, totalChunks = 0n, totalSegs = 0n, totalPend = 0n, totalMem = 0n, totalFile = 0n;
+  let totalN = 0n, totalChunks = 0n, totalSegs = 0n, totalPend = 0n, totalShards = 0n, totalMem = 0n, totalFile = 0n;
 
   for (let k = 0n; k <= activeMax; k++) {
     const l = levelSize(L, N, k);
@@ -626,14 +629,15 @@ function renderPerLevel(L, N, D) {
     const tl = l % C;
     const seg = fc / S;
     const pend = fc % S;
+    const sc = shardCount(l);
     const mem = memLevel(l);
     const df = dataFileSize(l);
 
-    totalN += l; totalChunks += fc; totalSegs += seg; totalPend += pend; totalMem += mem; totalFile += df;
+    totalN += l; totalChunks += fc; totalSegs += seg; totalPend += pend; totalShards += sc; totalMem += mem; totalFile += df;
 
     html += `<tr>`;
     html += `<td>${k}</td><td>${fmtBig(l)}</td><td>${fmtBig(fc)}</td><td>${tl}</td>`;
-    html += `<td>${fmtBig(seg)}</td><td>${pend}</td><td>${fmtBytes(mem)}</td><td>${fmtBytes(df)}</td>`;
+    html += `<td>${fmtBig(seg)}</td><td>${pend}</td><td>${sc}</td><td>${fmtBytes(mem)}</td><td>${fmtBytes(df)}</td>`;
     html += '</tr>';
   }
 
@@ -642,12 +646,12 @@ function renderPerLevel(L, N, D) {
     const emptyMem = emptyCount * 4096n;
     totalMem += emptyMem;
     html += `<tr style="opacity:0.5"><td colspan="2">${emptyCount} empty levels</td>`;
-    html += `<td>0</td><td>0</td><td>0</td><td>0</td><td>${fmtBytes(emptyMem)}</td><td>0 B</td></tr>`;
+    html += `<td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>${fmtBytes(emptyMem)}</td><td>0 B</td></tr>`;
   }
 
   html += `<tr style="font-weight:700;border-top:2px solid var(--teal-mid)">`;
   html += `<td>Total</td><td>${fmtBig(totalN)}</td><td>${fmtBig(totalChunks)}</td><td>-</td>`;
-  html += `<td>${fmtBig(totalSegs)}</td><td>${totalPend}</td><td>${fmtBytes(totalMem)}</td><td>${fmtBytes(totalFile)}</td>`;
+  html += `<td>${fmtBig(totalSegs)}</td><td>${totalPend}</td><td>${totalShards}</td><td>${fmtBytes(totalMem)}</td><td>${fmtBytes(totalFile)}</td>`;
   html += '</tr></tbody></table>';
   return html;
 }
@@ -717,14 +721,16 @@ function renderStorageTab(L, N, D, b) {
   html += `<tr><td>WAL single insert entry</td><td>${walSingle} B</td></tr>`;
   html += `<tr><td>WAL batch entry (b=${fmtBig(b)})</td><td>${fmtBytes(walBatch)}</td></tr>`;
   html += `<tr><td>Tails file (${D} levels &times; 4096)</td><td>${fmtBytes(tailsFile)}</td></tr>`;
+  html += `<tr><td>Shard file (max, 64K chunks)</td><td>${fmtBytes(SHARD_BYTE_SIZE)}</td></tr>`;
   html += `<tr><td>Data files total</td><td>${fmtBytes(dataTotal)}</td></tr>`;
   html += `<tr style="font-weight:700;border-top:2px solid var(--teal-mid)"><td>Checkpoint disk total (excl. WAL)</td><td>${fmtBytes(diskTotal)}</td></tr>`;
   html += '</tbody></table></div>';
 
-  html += '<div><table><thead><tr><th>Level</th><th>Nodes</th><th>Full Chunks</th><th>Data File</th></tr></thead><tbody>';
+  html += '<div><table><thead><tr><th>Level</th><th>Nodes</th><th>Full Chunks</th><th>Shards</th><th>Data Size</th></tr></thead><tbody>';
   for (let k = 0n; k <= activeMax; k++) {
     const l = levelSize(L, N, k);
-    html += `<tr><td>${k}</td><td>${fmtBig(l)}</td><td>${fmtBig(l / C)}</td><td>${fmtBytes(dataFileSize(l))}</td></tr>`;
+    const sc = shardCount(l);
+    html += `<tr><td>${k}</td><td>${fmtBig(l)}</td><td>${fmtBig(l / C)}</td><td>${sc}</td><td>${fmtBytes(dataFileSize(l))}</td></tr>`;
   }
   html += '</tbody></table></div></div>';
   return html;
