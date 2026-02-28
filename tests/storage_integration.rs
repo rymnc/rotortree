@@ -760,7 +760,11 @@ fn root_recomputation_catches_bit_rot() {
     tree.close().unwrap();
 
     // when
-    let level_path = dir.path().join("data").join("level_0.dat");
+    let level_path = dir
+        .path()
+        .join("data")
+        .join("level_0")
+        .join("shard_0000.dat");
     let mut data = std::fs::read(&level_path).unwrap();
     data[16] ^= 0xFF;
     std::fs::write(&level_path, &data).unwrap();

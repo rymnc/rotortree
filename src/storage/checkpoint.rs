@@ -27,6 +27,15 @@ const HEADER_MAGIC: [u8; 4] = *b"RTRD";
 const META_MAGIC: [u8; 4] = *b"RTMD";
 
 pub(crate) const CHUNK_BYTE_SIZE: usize = CHUNK_SIZE * 32;
+pub(crate) const CHUNKS_PER_SHARD: usize = 65_536;
+
+/// Returns `(shard_index, byte_offset_within_shard)` for a given chunk index.
+#[inline]
+pub(crate) fn shard_address(chunk_idx: usize) -> (usize, usize) {
+    let shard_idx = chunk_idx / CHUNKS_PER_SHARD;
+    let offset_in_shard = (chunk_idx % CHUNKS_PER_SHARD) * CHUNK_BYTE_SIZE;
+    (shard_idx, offset_in_shard)
+}
 
 /// Controls when checkpoints are triggered
 pub enum CheckpointPolicy {
@@ -237,8 +246,16 @@ pub(crate) fn read_tails(
     Ok(Some(tails))
 }
 
-pub(crate) fn level_file_path(data_dir: &Path, level_idx: usize) -> PathBuf {
-    data_dir.join(format!("level_{level_idx}.dat"))
+pub(crate) fn level_dir_path(data_dir: &Path, level_idx: usize) -> PathBuf {
+    data_dir.join(format!("level_{level_idx}"))
+}
+
+pub(crate) fn shard_file_path(
+    data_dir: &Path,
+    level_idx: usize,
+    shard_idx: usize,
+) -> PathBuf {
+    level_dir_path(data_dir, level_idx).join(format!("shard_{shard_idx:04}.dat"))
 }
 
 pub(crate) fn append_chunks_to_level<'a>(
@@ -246,52 +263,84 @@ pub(crate) fn append_chunks_to_level<'a>(
     level_idx: usize,
     from_chunk: usize,
     chunks: impl Iterator<Item = &'a [Hash; CHUNK_SIZE]>,
-) -> io::Result<fs::File> {
-    let path = level_file_path(data_dir, level_idx);
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .read(true)
-        .truncate(false)
-        .open(&path)?;
-
-    let offset = (from_chunk as u64) * (CHUNK_BYTE_SIZE as u64);
-    file.seek(io::SeekFrom::Start(offset))?;
-
-    for chunk in chunks {
-        file.write_all(chunk.as_flattened())?;
+) -> io::Result<Vec<fs::File>> {
+    let chunks: Vec<_> = chunks.collect();
+    if chunks.is_empty() {
+        return Ok(Vec::new());
     }
-    Ok(file)
+
+    fs::create_dir_all(level_dir_path(data_dir, level_idx))?;
+
+    let first_shard = from_chunk / CHUNKS_PER_SHARD;
+    let last_shard = (from_chunk + chunks.len() - 1) / CHUNKS_PER_SHARD;
+
+    (first_shard..=last_shard)
+        .map(|shard_idx| {
+            let shard_start = shard_idx * CHUNKS_PER_SHARD;
+            let local_start = shard_start.saturating_sub(from_chunk);
+            let local_end = ((shard_idx + 1) * CHUNKS_PER_SHARD)
+                .saturating_sub(from_chunk)
+                .min(chunks.len());
+            let (_, offset) = shard_address(from_chunk + local_start);
+
+            let path = shard_file_path(data_dir, level_idx, shard_idx);
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .read(true)
+                .truncate(false)
+                .open(&path)?;
+            file.seek(io::SeekFrom::Start(offset as u64))?;
+
+            for chunk in &chunks[local_start..local_end] {
+                file.write_all(chunk.as_flattened())?;
+            }
+
+            Ok(file)
+        })
+        .collect()
 }
 
-pub(crate) fn mmap_level_file(
+pub(crate) fn mmap_level_shards(
     data_dir: &Path,
     level_idx: usize,
     valid_chunks: usize,
-) -> io::Result<Option<Arc<MmapRegion>>> {
+) -> io::Result<Vec<Arc<MmapRegion>>> {
     if valid_chunks == 0 {
-        return Ok(None);
-    }
-    let path = level_file_path(data_dir, level_idx);
-    let file = match fs::File::open(&path) {
-        Ok(f) => f,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e),
-    };
-    let file_len = usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX);
-    let valid_len = valid_chunks * CHUNK_BYTE_SIZE;
-    if file_len < valid_len {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "level_{level_idx}.dat too small: {file_len} bytes < {valid_len} expected"
-            ),
-        ));
+        return Ok(Vec::new());
     }
 
-    let mmap = unsafe { memmap2::MmapOptions::new().len(file_len).map_copy(&file)? };
+    let shard_count = valid_chunks.div_ceil(CHUNKS_PER_SHARD);
+    let mut regions = Vec::with_capacity(shard_count);
 
-    Ok(Some(Arc::new(MmapRegion::new(mmap, valid_len))))
+    for shard_idx in 0..shard_count {
+        let path = shard_file_path(data_dir, level_idx, shard_idx);
+        let file = match fs::File::open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(e),
+        };
+
+        let chunks_in_shard =
+            CHUNKS_PER_SHARD.min(valid_chunks - shard_idx * CHUNKS_PER_SHARD);
+        let valid_len = chunks_in_shard * CHUNK_BYTE_SIZE;
+        let file_len = usize::try_from(file.metadata()?.len()).unwrap_or(usize::MAX);
+
+        if file_len < valid_len {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "level_{level_idx}/shard_{shard_idx:04}.dat too small: \
+                     {file_len} bytes < {valid_len} expected"
+                ),
+            ));
+        }
+
+        let mmap = unsafe { memmap2::MmapOptions::new().len(file_len).map_copy(&file)? };
+        regions.push(Arc::new(MmapRegion::new(mmap, valid_len)));
+    }
+
+    Ok(regions)
 }
 
 pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> io::Result<()> {

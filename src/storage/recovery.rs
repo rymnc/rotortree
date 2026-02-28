@@ -184,19 +184,19 @@ where
         let num_chunks = len / CHUNK_SIZE;
         let tail_len = len % CHUNK_SIZE;
 
-        let region = if num_chunks > 0 {
-            checkpoint::mmap_level_file(data_dir, level_idx, num_chunks)?
+        let regions = if num_chunks > 0 {
+            checkpoint::mmap_level_shards(data_dir, level_idx, num_chunks)?
         } else {
-            None
+            Vec::new()
         };
 
-        let mut chunks = Vec::with_capacity(num_chunks);
-        if let Some(ref region) = region {
-            for chunk_idx in 0..num_chunks {
-                let offset = chunk_idx * checkpoint::CHUNK_BYTE_SIZE;
-                chunks.push(Chunk::new_mapped(Arc::clone(region), offset));
-            }
-        }
+        let chunks: Vec<Chunk> = (0..num_chunks)
+            .filter(|_| !regions.is_empty())
+            .map(|chunk_idx| {
+                let (shard_idx, offset_in_shard) = checkpoint::shard_address(chunk_idx);
+                Chunk::new_mapped(Arc::clone(&regions[shard_idx]), offset_in_shard)
+            })
+            .collect();
 
         inner.set_level_from_parts(level_idx, chunks, tails[level_idx], tail_len, len);
     }

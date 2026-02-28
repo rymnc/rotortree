@@ -268,13 +268,13 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
         for (level_idx, ld) in snap.level_data.iter().enumerate() {
             if !ld.new_chunks.is_empty() {
                 let chunks_iter = ld.new_chunks.iter().map(|c| c.as_slice());
-                let file = checkpoint::append_chunks_to_level(
+                let mut shard_files = checkpoint::append_chunks_to_level(
                     &self.data_dir,
                     level_idx,
                     ld.from_chunk,
                     chunks_iter,
                 )?;
-                files_to_sync.push(file);
+                files_to_sync.append(&mut shard_files);
             }
         }
 
@@ -307,15 +307,16 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
             for (level_idx, ld) in snap.level_data.iter().enumerate() {
                 let snapshot_total = ld.total_chunks;
 
-                if snapshot_total > 0
-                    && level_idx < self.tiering.pin_above_level
-                    && let Some(region) = checkpoint::mmap_level_file(
+                if snapshot_total > 0 && level_idx < self.tiering.pin_above_level {
+                    let regions = checkpoint::mmap_level_shards(
                         &self.data_dir,
                         level_idx,
                         snapshot_total,
-                    )?
-                {
-                    state.inner.levels[level_idx].remap_chunks(snapshot_total, &region);
+                    )?;
+                    if !regions.is_empty() {
+                        state.inner.levels[level_idx]
+                            .remap_chunks(snapshot_total, &regions);
+                    }
                 }
 
                 state.checkpointed_chunks[level_idx] = snapshot_total;

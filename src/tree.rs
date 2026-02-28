@@ -435,18 +435,18 @@ impl ChunkedLevel {
         result
     }
 
-    /// Remap the first `count` chunks to mmap-backed chunks
+    /// Remap the first `count` chunks to mmap-backed chunks (one region per shard)
     #[cfg(feature = "storage")]
     pub(crate) fn remap_chunks(
         &mut self,
         count: usize,
-        region: &Arc<crate::storage::data::MmapRegion>,
+        regions: &[Arc<crate::storage::data::MmapRegion>],
     ) {
-        use crate::storage::checkpoint::CHUNK_BYTE_SIZE;
+        use crate::storage::checkpoint::shard_address;
 
         let total = self.chunk_count();
         let remap_count = count.min(total);
-        if remap_count == 0 {
+        if remap_count == 0 || regions.is_empty() {
             return;
         }
 
@@ -466,13 +466,13 @@ impl ChunkedLevel {
         self.segments.clear();
         self.pending.clear();
 
-        for chunk_idx in 0..remap_count {
-            let offset = chunk_idx * CHUNK_BYTE_SIZE;
-            self.push_chunk(Chunk::new_mapped(Arc::clone(region), offset));
-        }
-        for chunk in unmapped {
-            self.push_chunk(chunk);
-        }
+        (0..remap_count)
+            .map(|chunk_idx| {
+                let (shard_idx, offset_in_shard) = shard_address(chunk_idx);
+                Chunk::new_mapped(Arc::clone(&regions[shard_idx]), offset_in_shard)
+            })
+            .chain(unmapped)
+            .for_each(|chunk| self.push_chunk(chunk));
     }
 
     /// Access the tail buffer
