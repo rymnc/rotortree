@@ -267,6 +267,10 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
 
         for (level_idx, ld) in snap.level_data.iter().enumerate() {
             if !ld.new_chunks.is_empty() {
+                std::fs::create_dir_all(checkpoint::level_dir_path(
+                    &self.data_dir,
+                    level_idx,
+                ))?;
                 let chunks_iter = ld.new_chunks.iter().map(|c| c.as_slice());
                 let mut shard_files = checkpoint::append_chunks_to_level(
                     &self.data_dir,

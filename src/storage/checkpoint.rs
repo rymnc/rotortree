@@ -255,7 +255,7 @@ pub(crate) fn shard_file_path(
     level_idx: usize,
     shard_idx: usize,
 ) -> PathBuf {
-    level_dir_path(data_dir, level_idx).join(format!("shard_{shard_idx:04}.dat"))
+    data_dir.join(format!("level_{level_idx}/shard_{shard_idx:04}.dat"))
 }
 
 pub(crate) fn append_chunks_to_level<'a>(
@@ -268,8 +268,6 @@ pub(crate) fn append_chunks_to_level<'a>(
     if chunks.is_empty() {
         return Ok(Vec::new());
     }
-
-    fs::create_dir_all(level_dir_path(data_dir, level_idx))?;
 
     let first_shard = from_chunk / CHUNKS_PER_SHARD;
     let last_shard = (from_chunk + chunks.len() - 1) / CHUNKS_PER_SHARD;
@@ -317,7 +315,18 @@ pub(crate) fn mmap_level_shards(
         let path = shard_file_path(data_dir, level_idx, shard_idx);
         let file = match fs::File::open(&path) {
             Ok(f) => f,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound && shard_idx == 0 => {
+                return Ok(Vec::new());
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "level_{level_idx}/shard_{shard_idx:04}.dat missing \
+                         (shards 0..{shard_idx} exist)"
+                    ),
+                ));
+            }
             Err(e) => return Err(e),
         };
 

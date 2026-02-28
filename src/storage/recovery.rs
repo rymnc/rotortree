@@ -190,13 +190,17 @@ where
             Vec::new()
         };
 
-        let chunks: Vec<Chunk> = (0..num_chunks)
-            .filter(|_| !regions.is_empty())
-            .map(|chunk_idx| {
-                let (shard_idx, offset_in_shard) = checkpoint::shard_address(chunk_idx);
-                Chunk::new_mapped(Arc::clone(&regions[shard_idx]), offset_in_shard)
-            })
-            .collect();
+        let chunks: Vec<Chunk> = if regions.is_empty() {
+            Vec::new()
+        } else {
+            (0..num_chunks)
+                .map(|chunk_idx| {
+                    let (shard_idx, offset_in_shard) =
+                        checkpoint::shard_address(chunk_idx);
+                    Chunk::new_mapped(Arc::clone(&regions[shard_idx]), offset_in_shard)
+                })
+                .collect()
+        };
 
         inner.set_level_from_parts(level_idx, chunks, tails[level_idx], tail_len, len);
     }
