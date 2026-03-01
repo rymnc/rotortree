@@ -16,7 +16,7 @@ fn to_u8(v: usize) -> Result<u8, TreeError> {
 ///
 /// Uses a fixed-size `[Hash; N]` array (at most `N-1` siblings
 /// are valid, indicated by `sibling_count`).
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
 pub struct ProofLevel<const N: usize> {
     /// Child position within the group (`0..N-1`)
@@ -83,7 +83,7 @@ impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
 }
 
 /// Per-level data in a consistency proof
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
 pub struct ConsistencyLevel<const N: usize> {
     /// Number of shared (left) siblings in `hashes`
@@ -221,7 +221,7 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
             return Err(TreeError::NoUpdateNeeded);
         }
 
-        let mut new_levels = core::array::from_fn(|_| ProofLevel::<N>::EMPTY);
+        let mut new_levels = [ProofLevel::<N>::EMPTY; MAX_DEPTH];
         let mut old_level_size = u64_to_usize(self.old_size)?;
         let mut member_idx = u64_to_usize(old_proof.leaf_index)?;
         let mut new_boundary_hash = [0u8; 32];
@@ -236,12 +236,7 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
 
             if member_idx / N != boundary / N {
                 if tree_level < old_proof.level_count {
-                    let src = &old_proof.levels[tree_level];
-                    new_levels[tree_level] = ProofLevel {
-                        position: src.position,
-                        sibling_count: src.sibling_count,
-                        siblings: src.siblings,
-                    };
+                    new_levels[tree_level] = old_proof.levels[tree_level];
                 }
             } else {
                 let mut group = [[0u8; 32]; N];
@@ -329,7 +324,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
 
         let leaf_idx = u64_to_usize(leaf_index)?;
         let mut index = leaf_idx;
-        let mut levels = core::array::from_fn(|_| ProofLevel::<N>::EMPTY);
+        let mut levels = [ProofLevel::<N>::EMPTY; MAX_DEPTH];
 
         #[allow(clippy::needless_range_loop)]
         for level in 0..self.depth {
@@ -341,16 +336,14 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
             let mut group = [[0u8; 32]; N];
             self.levels[level].get_group(group_start, group_size, &mut group);
             let mut siblings = [[0u8; 32]; N];
-            let mut sib_idx = 0usize;
-            for i in 0..group_size {
-                if i != child_pos {
-                    siblings[sib_idx] = group[i];
-                    sib_idx += 1;
-                }
-            }
+            siblings[..child_pos].copy_from_slice(&group[..child_pos]);
+            let rest = group_size - child_pos - 1;
+            siblings[child_pos..child_pos + rest]
+                .copy_from_slice(&group[child_pos + 1..group_size]);
+            let sib_count = group_size - 1;
             levels[level] = ProofLevel {
                 position: to_u8(child_pos)?,
-                sibling_count: to_u8(sib_idx)?,
+                sibling_count: to_u8(sib_count)?,
                 siblings,
             };
 
@@ -381,7 +374,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
         }
 
         let new_root = self.root.expect("size > 0; qed");
-        let mut levels = core::array::from_fn(|_| ConsistencyLevel::<N>::EMPTY);
+        let mut levels = [ConsistencyLevel::<N>::EMPTY; MAX_DEPTH];
 
         if old_size == self.size {
             return Ok(ConsistencyProof {
@@ -856,7 +849,7 @@ mod tests {
             old_size: 0,
             new_size: 1,
             level_count: 0,
-            levels: core::array::from_fn(|_| ConsistencyLevel::EMPTY),
+            levels: [ConsistencyLevel::EMPTY; 32],
         };
         assert!(proof.verify(&XorHasher).is_err());
     }
@@ -869,7 +862,7 @@ mod tests {
             old_size: 5,
             new_size: 3,
             level_count: 0,
-            levels: core::array::from_fn(|_| ConsistencyLevel::EMPTY),
+            levels: [ConsistencyLevel::EMPTY; 32],
         };
         assert!(proof.verify(&XorHasher).is_err());
     }
@@ -945,5 +938,52 @@ mod tests {
     #[test]
     fn consistency_wincode_quaternary() {
         verify_wincode_consistency_round_trip::<4>();
+    }
+
+    #[test]
+    fn verify_rejects_level_count_exceeds_max_depth() {
+        let proof = NaryProof::<2, 4> {
+            root: [0u8; 32],
+            leaf: [0u8; 32],
+            leaf_index: 0,
+            level_count: 5,
+            levels: [ProofLevel::EMPTY; 4],
+        };
+        assert!(proof.verify(&XorHasher).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_position_exceeds_n() {
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        tree.insert(leaf(1)).unwrap();
+        tree.insert(leaf(2)).unwrap();
+        let snap = tree.snapshot();
+        let mut proof = snap.generate_proof(0).unwrap();
+        proof.levels[0].position = 2;
+        assert!(proof.verify(&XorHasher).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_sibling_count_exceeds_n() {
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
+        tree.insert(leaf(1)).unwrap();
+        tree.insert(leaf(2)).unwrap();
+        let snap = tree.snapshot();
+        let mut proof = snap.generate_proof(0).unwrap();
+        proof.levels[0].sibling_count = 2;
+        assert!(proof.verify(&XorHasher).is_err());
+    }
+
+    #[test]
+    fn consistency_verify_rejects_level_count_exceeds_max_depth() {
+        let proof = ConsistencyProof::<2, 4> {
+            old_root: [0u8; 32],
+            new_root: [0u8; 32],
+            old_size: 1,
+            new_size: 2,
+            level_count: 5,
+            levels: [ConsistencyLevel::EMPTY; 4],
+        };
+        assert!(proof.verify(&XorHasher).is_err());
     }
 }

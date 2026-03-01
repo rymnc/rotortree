@@ -111,6 +111,8 @@ where
 
     match wincode::deserialize(payload) {
         Ok(v) => Ok(Some(v)),
-        Err(_) => Ok(None),
+        Err(_) => Err(StorageError::SerdeFailed {
+            path: path.display().to_string(),
+        }),
     }
 }

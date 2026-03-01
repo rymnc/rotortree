@@ -209,3 +209,22 @@ proptest! {
         prop_assert_eq!(seq.root(), mixed.root());
     }
 }
+
+#[cfg(feature = "blake3")]
+proptest! {
+    #[test]
+    fn proof_round_trip_blake3_n2(
+        leaves in leaves_strategy(100)
+    ) {
+        let hasher = rotortree::Blake3Hasher;
+        let mut tree = LeanIMT::<rotortree::Blake3Hasher, 2, 32>::new(hasher);
+        for &leaf in &leaves {
+            tree.insert(leaf).unwrap();
+        }
+        let snap = tree.snapshot();
+        for i in 0..leaves.len() as u64 {
+            let proof = snap.generate_proof(i).unwrap();
+            prop_assert!(proof.verify(&hasher).unwrap());
+        }
+    }
+}

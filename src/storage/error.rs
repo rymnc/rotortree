@@ -45,6 +45,8 @@ pub enum StorageError {
     MathError,
     /// Data corruption detected (e.g., root recomputation mismatch)
     DataCorruption { detail: String },
+    /// Frame deserialization failed despite valid CRC (schema/version mismatch)
+    SerdeFailed { path: String },
 }
 
 impl fmt::Display for StorageError {
@@ -90,6 +92,9 @@ impl fmt::Display for StorageError {
             }
             Self::DataCorruption { detail } => {
                 write!(f, "data corruption: {detail}")
+            }
+            Self::SerdeFailed { path } => {
+                write!(f, "frame deserialization failed for {path}")
             }
         }
     }

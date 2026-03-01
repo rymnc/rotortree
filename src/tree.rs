@@ -212,6 +212,12 @@ impl ChunkedLevel {
     /// Read a hash at the given index.
     #[inline]
     pub(crate) fn get(&self, index: usize) -> Result<Hash, TreeError> {
+        if index >= self.len {
+            return Err(TreeError::IndexOutOfRange {
+                index: index as u64,
+                size: self.len as u64,
+            });
+        }
         let chunk_idx = index / CHUNK_SIZE;
         let offset = index % CHUNK_SIZE;
         if chunk_idx < self.chunk_count() {
@@ -244,22 +250,10 @@ impl ChunkedLevel {
     /// Write a hash at the given index
     #[inline]
     fn set(&mut self, index: usize, value: Hash) -> Result<(), TreeError> {
-        while self.len <= index {
-            self.push([0u8; 32])?;
+        if self.len <= index {
+            self.ensure_len(index + 1)?;
         }
-        let chunk_idx = index / CHUNK_SIZE;
-        let offset = index % CHUNK_SIZE;
-        let committed = self.segments.len() * CHUNKS_PER_SEGMENT;
-        if chunk_idx < committed {
-            let seg_idx = chunk_idx / CHUNKS_PER_SEGMENT;
-            let seg_off = chunk_idx % CHUNKS_PER_SEGMENT;
-            Arc::make_mut(&mut self.segments[seg_idx])[seg_off].make_mut()[offset] =
-                value;
-        } else if chunk_idx - committed < self.pending.len() {
-            self.pending[chunk_idx - committed].make_mut()[offset] = value;
-        } else {
-            self.tail[offset] = value;
-        }
+        self.set_preallocated(index, value);
         Ok(())
     }
 
@@ -288,6 +282,7 @@ impl ChunkedLevel {
 
     /// Append a hash. Promotes the tail when it reaches
     /// `CHUNK_SIZE`.
+    #[cfg(test)]
     #[inline]
     fn push(&mut self, value: Hash) -> Result<(), TreeError> {
         self.tail[self.tail_len] = value;
@@ -353,6 +348,12 @@ impl ChunkedLevel {
 
         let tail_space = CHUNK_SIZE - self.tail_len;
         let fill_tail = tail_space.min(needed);
+        debug_assert!(
+            self.tail[self.tail_len..self.tail_len + fill_tail]
+                .iter()
+                .all(|h| *h == [0u8; 32]),
+            "ensure_len: tail slots must be zeroed"
+        );
         self.tail_len += fill_tail;
         let mut filled = fill_tail;
         if self.tail_len == CHUNK_SIZE {
