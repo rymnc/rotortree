@@ -155,8 +155,11 @@ fn light_client(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<NodeMessage>
             }
 
             NodeMessage::Update { consistency_proof } => {
-                assert!(consistency_proof.verify(&hasher).unwrap());
-                assert_eq!(current_root.unwrap(), consistency_proof.old_root);
+                assert!(
+                    consistency_proof
+                        .verify_transition(&hasher, current_root.unwrap())
+                        .unwrap()
+                );
 
                 let old_proof = tracked_proof.as_ref().expect("tracked proof must exist");
                 let updated_proof = consistency_proof

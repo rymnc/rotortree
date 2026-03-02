@@ -13,6 +13,8 @@ pub enum TreeError {
     CapacityExceeded,
     /// Math error
     MathError,
+    /// Consistency proof depth mismatch
+    InvalidProofDepth { expected: usize, actual: usize },
     /// The proof update is a no-op (old_size == new_size)
     NoUpdateNeeded,
 }
@@ -46,6 +48,13 @@ impl fmt::Display for TreeError {
             }
             Self::MathError => {
                 write!(f, "math error")
+            }
+            Self::InvalidProofDepth { expected, actual } => {
+                write!(
+                    f,
+                    "consistency proof depth {actual} does not match \
+                     expected {expected}"
+                )
             }
             Self::NoUpdateNeeded => {
                 write!(f, "proof update is a no-op (same size)")

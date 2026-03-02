@@ -80,6 +80,18 @@ impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
 
         Ok(current == self.root)
     }
+
+    /// Verify this inclusion proof against an externally-trusted root.
+    pub fn verify_against<H: Hasher>(
+        &self,
+        hasher: &H,
+        trusted_root: Hash,
+    ) -> Result<bool, TreeError> {
+        if self.root != trusted_root {
+            return Ok(false);
+        }
+        self.verify(hasher)
+    }
 }
 
 /// Per-level data in a consistency proof
@@ -150,6 +162,25 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
         }
 
         let mut old_level_size = u64_to_usize(self.old_size)?;
+        let mut new_level_size = u64_to_usize(self.new_size)?;
+
+        let expected_depth = {
+            let (mut os, mut ns) = (old_level_size, new_level_size);
+            let mut d = 0usize;
+            while os > 1 || ns > 1 {
+                d += 1;
+                os = os.div_ceil(N);
+                ns = ns.div_ceil(N);
+            }
+            d
+        };
+        if self.level_count != expected_depth {
+            return Err(TreeError::InvalidProofDepth {
+                expected: expected_depth,
+                actual: self.level_count,
+            });
+        }
+
         let mut old_hash = [0u8; 32];
         let mut new_hash = [0u8; 32];
         let mut children = [[0u8; 32]; N];
@@ -157,14 +188,17 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
         for (i, level) in self.levels[..self.level_count].iter().enumerate() {
             let shared = level.shared_count as usize;
             let new_only = level.new_count as usize;
-            let boundary_pos = (old_level_size - 1) % N;
+            let boundary = old_level_size - 1;
+            let boundary_pos = boundary % N;
+            let group_start = boundary - boundary_pos;
 
-            let (expected_shared, max_sum) = if i == 0 {
-                (boundary_pos + 1, N)
+            let expected_shared = if i == 0 {
+                boundary_pos + 1
             } else {
-                (boundary_pos, N - 1)
+                boundary_pos
             };
-            if shared != expected_shared || shared + new_only > max_sum {
+            let expected_new_count = new_level_size.min(group_start + N) - boundary - 1;
+            if shared != expected_shared || new_only != expected_new_count {
                 return Err(TreeError::MathError);
             }
 
@@ -192,9 +226,34 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
             };
 
             old_level_size = old_level_size.div_ceil(N);
+            new_level_size = new_level_size.div_ceil(N);
         }
 
         Ok(old_hash == self.old_root && new_hash == self.new_root)
+    }
+
+    /// Verify this consistency proof against externally-trusted roots.
+    pub fn verify_against<H: Hasher>(
+        &self,
+        hasher: &H,
+        trusted_old_root: Hash,
+        trusted_new_root: Hash,
+    ) -> Result<bool, TreeError> {
+        if self.old_root != trusted_old_root || self.new_root != trusted_new_root {
+            return Ok(false);
+        }
+        self.verify(hasher)
+    }
+
+    /// Verify this consistency proof against a trusted old root.
+    ///
+    /// If verification succeeds, the caller can trust `self.new_root`.
+    pub fn verify_transition<H: Hasher>(
+        &self,
+        hasher: &H,
+        trusted_old_root: Hash,
+    ) -> Result<bool, TreeError> {
+        self.verify_against(hasher, trusted_old_root, self.new_root)
     }
 
     /// Update an existing inclusion proof from `old_root` to `new_root`.
@@ -208,6 +267,9 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
         hasher: &H,
     ) -> Result<NaryProof<N, MAX_DEPTH>, TreeError> {
         if old_proof.root != self.old_root {
+            return Err(TreeError::MathError);
+        }
+        if !self.verify(hasher)? {
             return Err(TreeError::MathError);
         }
         if old_proof.leaf_index >= self.old_size {
