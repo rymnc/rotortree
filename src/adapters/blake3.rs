@@ -14,8 +14,13 @@ impl Blake3Hasher {
 }
 
 impl Hasher for Blake3Hasher {
+    const DOMAIN_SEPARATOR: Hash = *b"rotortree-internal-v1\0\0\0\0\0\0\0\0\0\0\0";
+
     #[inline]
     fn hash_children(&self, children: &[Hash]) -> Hash {
-        *::blake3::hash(children.as_flattened()).as_bytes()
+        let mut hasher = ::blake3::Hasher::new();
+        hasher.update(&Self::DOMAIN_SEPARATOR);
+        hasher.update(children.as_flattened());
+        *hasher.finalize().as_bytes()
     }
 }

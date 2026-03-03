@@ -11,8 +11,10 @@ use rotortree::{
 struct XorHasher;
 
 impl Hasher for XorHasher {
+    const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
+
     fn hash_children(&self, children: &[Hash]) -> Hash {
-        let mut result = [0u8; 32];
+        let mut result = Self::DOMAIN_SEPARATOR;
         for child in children {
             for (r, c) in result.iter_mut().zip(child.iter()) {
                 *r ^= c;

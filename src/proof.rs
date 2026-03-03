@@ -4,6 +4,7 @@ use crate::{
     TreeError,
     tree::{
         TreeSnapshot,
+        ceil_log_n,
         u64_to_usize,
     },
 };
@@ -45,6 +46,8 @@ pub struct NaryProof<const N: usize, const MAX_DEPTH: usize> {
     pub leaf: Hash,
     /// The 0-based index of the leaf
     pub leaf_index: u64,
+    /// Number of leaves in the tree this proof was generated from
+    pub tree_size: u64,
     /// Number of valid levels in `levels`
     pub level_count: usize,
     /// Proof levels from leaf to root
@@ -54,28 +57,43 @@ pub struct NaryProof<const N: usize, const MAX_DEPTH: usize> {
 impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
     /// Verify this proof against the given hasher.
     pub fn verify<H: Hasher>(&self, hasher: &H) -> Result<bool, TreeError> {
-        if self.level_count > MAX_DEPTH {
+        if self.tree_size == 0 || self.leaf_index >= self.tree_size {
             return Err(TreeError::MathError);
         }
 
+        let expected_depth = ceil_log_n(self.tree_size, N);
+        if self.level_count != expected_depth || expected_depth > MAX_DEPTH {
+            return Err(TreeError::InvalidProofDepth {
+                expected: expected_depth,
+                actual: self.level_count,
+            });
+        }
+
+        let mut expected_index = u64_to_usize(self.leaf_index)?;
         let mut current = self.leaf;
         let mut children = [[0u8; 32]; N];
 
         for level in &self.levels[..self.level_count] {
-            if level.sibling_count == 0 {
-                continue;
-            }
-
-            let total = (level.sibling_count as usize) + 1;
-            let pos = level.position as usize;
-            if total > N || pos >= total {
+            let expected_pos = expected_index % N;
+            if level.position as usize != expected_pos {
                 return Err(TreeError::MathError);
             }
-            children[..pos].copy_from_slice(&level.siblings[..pos]);
-            children[pos] = current;
-            let rest = total - pos - 1;
-            children[pos + 1..total].copy_from_slice(&level.siblings[pos..pos + rest]);
-            current = hasher.hash_children(&children[..total]);
+
+            if level.sibling_count > 0 {
+                let total = (level.sibling_count as usize) + 1;
+                let pos = level.position as usize;
+                if total > N || pos >= total {
+                    return Err(TreeError::MathError);
+                }
+                children[..pos].copy_from_slice(&level.siblings[..pos]);
+                children[pos] = current;
+                let rest = total - pos - 1;
+                children[pos + 1..total]
+                    .copy_from_slice(&level.siblings[pos..pos + rest]);
+                current = hasher.hash_children(&children[..total]);
+            }
+
+            expected_index /= N;
         }
 
         Ok(current == self.root)
@@ -365,6 +383,7 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
             root: self.new_root,
             leaf: old_proof.leaf,
             leaf_index: old_proof.leaf_index,
+            tree_size: self.new_size,
             level_count: self.level_count,
             levels: new_levels,
         })
@@ -416,6 +435,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeSnapshot<N, MAX_DEPTH> {
             root: self.root.expect("set prev; qed"),
             leaf: self.levels[0].get(leaf_idx)?,
             leaf_index,
+            tree_size: self.size,
             level_count: self.depth,
             levels,
         })
@@ -512,8 +532,10 @@ mod tests {
     struct XorHasher;
 
     impl crate::Hasher for XorHasher {
+        const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
+
         fn hash_children(&self, children: &[Hash]) -> Hash {
-            let mut result = [0u8; 32];
+            let mut result = Self::DOMAIN_SEPARATOR;
             for child in children {
                 for (r, c) in result.iter_mut().zip(child.iter()) {
                     *r ^= c;
@@ -1008,6 +1030,7 @@ mod tests {
             root: [0u8; 32],
             leaf: [0u8; 32],
             leaf_index: 0,
+            tree_size: 2,
             level_count: 5,
             levels: [ProofLevel::EMPTY; 4],
         };
@@ -1047,5 +1070,95 @@ mod tests {
             levels: [ConsistencyLevel::EMPTY; 4],
         };
         assert!(proof.verify(&XorHasher).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_spoofed_leaf_index() {
+        let h = XorHasher;
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        tree.insert(leaf(1)).unwrap();
+        tree.insert(leaf(2)).unwrap();
+        let snap = tree.snapshot();
+
+        let mut proof = snap.generate_proof(0).unwrap();
+        proof.leaf_index = 1; // spoof: claim index 1 instead of 0
+        assert!(proof.verify(&h).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_padded_levels() {
+        let h = XorHasher;
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        tree.insert(leaf(1)).unwrap();
+        tree.insert(leaf(2)).unwrap();
+        let snap = tree.snapshot();
+
+        let mut proof = snap.generate_proof(0).unwrap();
+        // Pad with an extra zero-sibling level
+        proof.level_count = 2;
+        proof.levels[1] = ProofLevel::EMPTY;
+        assert!(proof.verify(&h).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_truncated_levels() {
+        let h = XorHasher;
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        for i in 1..=4 {
+            tree.insert(leaf(i)).unwrap();
+        }
+        let snap = tree.snapshot();
+
+        let mut proof = snap.generate_proof(2).unwrap();
+        // Truncate: claim fewer levels than the tree requires
+        proof.level_count = 1;
+        assert!(proof.verify(&h).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_tree_size_zero() {
+        let proof = NaryProof::<2, 4> {
+            root: [0u8; 32],
+            leaf: [0u8; 32],
+            leaf_index: 0,
+            tree_size: 0,
+            level_count: 0,
+            levels: [ProofLevel::EMPTY; 4],
+        };
+        assert!(proof.verify(&XorHasher).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_leaf_index_ge_tree_size() {
+        let h = XorHasher;
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        tree.insert(leaf(1)).unwrap();
+        tree.insert(leaf(2)).unwrap();
+        let snap = tree.snapshot();
+
+        let mut proof = snap.generate_proof(0).unwrap();
+        proof.leaf_index = 2; // >= tree_size of 2
+        assert!(proof.verify(&h).is_err());
+    }
+
+    #[test]
+    fn verify_rejects_tree_size_exceeding_max_depth() {
+        // tree_size=32 with N=2 requires depth 5, but MAX_DEPTH=4.
+        // Must not panic on self.levels[..5] slice.
+        let proof = NaryProof::<2, 4> {
+            root: [0u8; 32],
+            leaf: [0u8; 32],
+            leaf_index: 0,
+            tree_size: 32,
+            level_count: 5,
+            levels: [ProofLevel::EMPTY; 4],
+        };
+        match proof.verify(&XorHasher) {
+            Err(TreeError::InvalidProofDepth {
+                expected: 5,
+                actual: 5,
+            }) => {}
+            other => panic!("expected InvalidProofDepth, got {other:?}"),
+        }
     }
 }

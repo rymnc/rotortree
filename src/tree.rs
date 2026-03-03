@@ -137,7 +137,7 @@ impl Chunk {
 /// - `size == N^k` → k
 #[allow(clippy::arithmetic_side_effects)]
 #[inline(always)]
-fn ceil_log_n(size: u64, n: usize) -> usize {
+pub(crate) fn ceil_log_n(size: u64, n: usize) -> usize {
     if size <= 1 {
         return 0;
     }
@@ -1039,8 +1039,10 @@ mod tests {
     struct XorHasher;
 
     impl crate::Hasher for XorHasher {
+        const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
+
         fn hash_children(&self, children: &[Hash]) -> Hash {
-            let mut result = [0u8; 32];
+            let mut result = Self::DOMAIN_SEPARATOR;
             for child in children {
                 for (r, c) in result.iter_mut().zip(child.iter()) {
                     *r ^= c;
@@ -1447,8 +1449,10 @@ mod concurrent_tests {
     struct XorHasher;
 
     impl crate::Hasher for XorHasher {
+        const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
+
         fn hash_children(&self, children: &[Hash]) -> Hash {
-            let mut result = [0u8; 32];
+            let mut result = Self::DOMAIN_SEPARATOR;
             for child in children {
                 for (r, c) in result.iter_mut().zip(child.iter()) {
                     *r ^= c;
@@ -1633,8 +1637,10 @@ mod parallel_tests {
     struct XorHasher;
 
     impl crate::Hasher for XorHasher {
+        const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
+
         fn hash_children(&self, children: &[Hash]) -> Hash {
-            let mut result = [0u8; 32];
+            let mut result = Self::DOMAIN_SEPARATOR;
             for child in children {
                 for (r, c) in result.iter_mut().zip(child.iter()) {
                     *r ^= c;

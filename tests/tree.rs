@@ -11,8 +11,10 @@ use rotortree::{
 struct XorHasher;
 
 impl Hasher for XorHasher {
+    const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
+
     fn hash_children(&self, children: &[Hash]) -> Hash {
-        let mut result = [0u8; 32];
+        let mut result = Self::DOMAIN_SEPARATOR;
         for child in children {
             for (r, c) in result.iter_mut().zip(child.iter()) {
                 *r ^= c;
@@ -213,8 +215,8 @@ fn proof_verify_rejects_bad_level_count() {
 
     // then
     match proof.verify(&XorHasher) {
-        Err(TreeError::MathError) => {}
-        other => panic!("expected MathError, got {other:?}"),
+        Err(TreeError::InvalidProofDepth { .. }) => {}
+        other => panic!("expected InvalidProofDepth, got {other:?}"),
     }
 }
 

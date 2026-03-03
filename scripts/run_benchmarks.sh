@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Run all rotortrie divan benchmarks and generate an HTML report.
+# Run all rotortree divan benchmarks and generate an HTML report.
 #
 # Usage:
 #   ./scripts/run_benchmarks.sh [--output-dir DIR]
