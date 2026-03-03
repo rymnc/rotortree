@@ -37,6 +37,7 @@ pub use error::TreeError;
 pub use hash::{
     Hash,
     Hasher,
+    TreeHasher,
 };
 pub use proof::{
     ConsistencyLevel,

@@ -4,6 +4,7 @@ use rotortree::{
     FlushPolicy,
     RotorTree,
     RotorTreeConfig,
+    TreeHasher,
 };
 
 mod common;
@@ -178,7 +179,7 @@ fn bench_mixed_workload(n_values: Vec<usize>) {
                 fn mixed_workload_n{{n}}_{{tick}}(bencher: divan::Bencher) {
                     let prepop_leaves = generate_leaves(10_000);
                     let tick_leaves = generate_leaves({{tick}});
-                    let hasher = Blake3Hasher;
+                    let th = TreeHasher::new(Blake3Hasher);
 
                     bencher
                         .counter(divan::counter::ItemsCount::new({{tick}} as usize))
@@ -207,7 +208,7 @@ fn bench_mixed_workload(n_values: Vec<usize>) {
                             let proof = snap.generate_proof(proof_index).unwrap();
                             divan::black_box(&proof);
 
-                            divan::black_box(proof.verify(&hasher).unwrap());
+                            divan::black_box(proof.verify(&th).unwrap());
                             tree.close().unwrap();
                         });
                 }
@@ -229,7 +230,7 @@ fn bench_sustained_checkpoint(n_values: Vec<usize>) {
                     #[divan::bench]
                     fn sustained_checkpoint_n{{n}}_{{count}}_every{{freq}}(bencher: divan::Bencher) {
                         let leaves = generate_leaves({{count}});
-                        let hasher = Blake3Hasher;
+                        let th = TreeHasher::new(Blake3Hasher);
                         bencher
                             .counter(divan::counter::ItemsCount::new({{count}} as usize))
                             .with_inputs(|| {
@@ -252,13 +253,13 @@ fn bench_sustained_checkpoint(n_values: Vec<usize>) {
                                     let size = snap.size();
                                     // proof at oldest leaf
                                     let proof = snap.generate_proof(0).unwrap();
-                                    divan::black_box(proof.verify(&hasher).unwrap());
+                                    divan::black_box(proof.verify(&th).unwrap());
                                     // proof at midpoint
                                     let proof = snap.generate_proof(size / 2).unwrap();
-                                    divan::black_box(proof.verify(&hasher).unwrap());
+                                    divan::black_box(proof.verify(&th).unwrap());
                                     // proof at newest leaf
                                     let proof = snap.generate_proof(size - 1).unwrap();
-                                    divan::black_box(proof.verify(&hasher).unwrap());
+                                    divan::black_box(proof.verify(&th).unwrap());
                                 }
                             });
                     }

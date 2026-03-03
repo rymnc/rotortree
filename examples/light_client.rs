@@ -26,6 +26,7 @@ use rotortree::{
     RotorTree,
     RotorTreeConfig,
     TieringConfig,
+    TreeHasher,
 };
 use std::{
     mem,
@@ -64,6 +65,7 @@ fn generate_leaves(start: u64, count: u64) -> Vec<Hash> {
 
 fn full_node(tx: mpsc::Sender<NodeMessage>, rx: mpsc::Receiver<ClientMessage>) {
     let hasher = Blake3Hasher;
+    let th = TreeHasher::new(Blake3Hasher);
     let _ = std::fs::remove_dir_all(DB_PATH);
     let config = RotorTreeConfig {
         path: PathBuf::from(DB_PATH),
@@ -90,7 +92,7 @@ fn full_node(tx: mpsc::Sender<NodeMessage>, rx: mpsc::Receiver<ClientMessage>) {
 
             let ClientMessage::InclusionProof(proof) = rx.recv().unwrap();
             let snap = tree.snapshot();
-            assert!(proof.verify(&hasher).unwrap());
+            assert!(proof.verify(&th).unwrap());
             assert_eq!(proof.root, snap.root().unwrap());
             println!("  [full node] batch 0: client proof verified");
         } else {
@@ -115,7 +117,7 @@ fn full_node(tx: mpsc::Sender<NodeMessage>, rx: mpsc::Receiver<ClientMessage>) {
             tx.send(NodeMessage::Update { consistency_proof }).unwrap();
 
             let ClientMessage::InclusionProof(proof) = rx.recv().unwrap();
-            assert!(proof.verify(&hasher).unwrap());
+            assert!(proof.verify(&th).unwrap());
             assert_eq!(proof.root, new_snap.root().unwrap());
             println!("  [full node] batch {batch}: client proof verified");
         }
@@ -128,6 +130,7 @@ fn full_node(tx: mpsc::Sender<NodeMessage>, rx: mpsc::Receiver<ClientMessage>) {
 
 fn light_client(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<NodeMessage>) {
     let hasher = Blake3Hasher;
+    let th = TreeHasher::new(Blake3Hasher);
     let mut tracked_proof: Option<NaryProof<N, MAX_DEPTH>> = None;
     let mut current_root: Option<Hash> = None;
 
@@ -140,7 +143,7 @@ fn light_client(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<NodeMessage>
                 let proof = snap
                     .generate_proof(TRACKED_LEAF)
                     .expect("generate_proof failed");
-                assert!(proof.verify(&hasher).unwrap());
+                assert!(proof.verify(&th).unwrap());
 
                 current_root = snap.root();
                 println!(
@@ -157,16 +160,16 @@ fn light_client(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<NodeMessage>
             NodeMessage::Update { consistency_proof } => {
                 assert!(
                     consistency_proof
-                        .verify_transition(&hasher, current_root.unwrap())
+                        .verify_transition(&th, current_root.unwrap())
                         .unwrap()
                 );
 
                 let old_proof = tracked_proof.as_ref().expect("tracked proof must exist");
                 let updated_proof = consistency_proof
-                    .update_inclusion_proof(old_proof, &hasher)
+                    .update_inclusion_proof(old_proof, &th)
                     .expect("update_inclusion_proof failed");
 
-                assert!(updated_proof.verify(&hasher).unwrap());
+                assert!(updated_proof.verify(&th).unwrap());
                 assert_eq!(updated_proof.root, consistency_proof.new_root);
 
                 current_root = Some(consistency_proof.new_root);
@@ -176,7 +179,7 @@ fn light_client(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<NodeMessage>
                     consistency_proof.old_size, consistency_proof.new_size,
                 );
                 let send_proof = consistency_proof
-                    .update_inclusion_proof(old_proof, &hasher)
+                    .update_inclusion_proof(old_proof, &th)
                     .expect("update_inclusion_proof failed");
                 tracked_proof = Some(updated_proof);
                 tx.send(ClientMessage::InclusionProof(send_proof)).unwrap();

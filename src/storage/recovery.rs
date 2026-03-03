@@ -18,6 +18,7 @@ use super::checkpoint;
 use crate::{
     Hash,
     Hasher,
+    TreeHasher,
     tree::TreeInner,
 };
 
@@ -65,7 +66,7 @@ impl WalFile for std::fs::File {
 /// incomplete tail entries.
 pub(crate) fn recover<H, F, const N: usize, const MAX_DEPTH: usize>(
     file: &mut F,
-    hasher: &H,
+    hasher: &TreeHasher<H>,
 ) -> Result<RecoveryResult<N, MAX_DEPTH>, StorageError>
 where
     H: Hasher,
@@ -126,7 +127,7 @@ where
 /// Recover from checkpoint data files, falling back to full wal replay
 pub(crate) fn recover_with_checkpoint<H, F, const N: usize, const MAX_DEPTH: usize>(
     wal_file: &mut F,
-    hasher: &H,
+    hasher: &TreeHasher<H>,
     data_dir: &std::path::Path,
     verify: bool,
 ) -> Result<RecoveryResult<N, MAX_DEPTH>, StorageError>
@@ -285,7 +286,7 @@ where
 /// replay wal
 fn replay_wal_entries<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
     entry_data: &[u8],
-    hasher: &H,
+    hasher: &TreeHasher<H>,
     inner: &mut TreeInner<N, MAX_DEPTH>,
     skip_until_seq: Option<u64>,
 ) -> Result<(Option<u64>, usize), StorageError> {
@@ -337,7 +338,7 @@ fn replay_wal_entries<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
 /// Flush accumulated single-insert leaves as a batch
 fn flush_pending<H: Hasher, const N: usize, const MAX_DEPTH: usize>(
     inner: &mut TreeInner<N, MAX_DEPTH>,
-    hasher: &H,
+    hasher: &TreeHasher<H>,
     pending: &mut Vec<Hash>,
 ) -> Result<(), StorageError> {
     if pending.is_empty() {
@@ -424,14 +425,10 @@ mod tests {
     struct XorHasher;
 
     impl crate::Hasher for XorHasher {
-        const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
-
-        fn hash_children(&self, children: &[Hash]) -> Hash {
-            let mut result = Self::DOMAIN_SEPARATOR;
-            for child in children {
-                for (r, c) in result.iter_mut().zip(child.iter()) {
-                    *r ^= c;
-                }
+        fn hash_bytes(&self, data: &[u8]) -> Hash {
+            let mut result = [0u8; 32];
+            for (i, &b) in data.iter().enumerate() {
+                result[i % 32] ^= b;
             }
             result
         }
@@ -446,7 +443,9 @@ mod tests {
     #[test]
     fn recover_empty_wal() {
         let mut file = MemFile::new();
-        let result = recover::<XorHasher, _, 2, 32>(&mut file, &XorHasher).unwrap();
+        let result =
+            recover::<XorHasher, _, 2, 32>(&mut file, &TreeHasher::new(XorHasher))
+                .unwrap();
         assert_eq!(result.inner.size, 0);
         assert_eq!(result.inner.root, None);
         assert_eq!(result.next_seq, 0);
@@ -463,7 +462,9 @@ mod tests {
         }
 
         let mut file = MemFile::from_bytes(buf);
-        let result = recover::<XorHasher, _, 2, 32>(&mut file, &XorHasher).unwrap();
+        let result =
+            recover::<XorHasher, _, 2, 32>(&mut file, &TreeHasher::new(XorHasher))
+                .unwrap();
         assert_eq!(result.inner.size, 5);
         assert_eq!(result.next_seq, 5);
         assert!(result.inner.root.is_some());
@@ -480,7 +481,9 @@ mod tests {
         );
 
         let mut file = MemFile::from_bytes(buf);
-        let result = recover::<XorHasher, _, 2, 32>(&mut file, &XorHasher).unwrap();
+        let result =
+            recover::<XorHasher, _, 2, 32>(&mut file, &TreeHasher::new(XorHasher))
+                .unwrap();
         assert_eq!(result.inner.size, 10);
         assert_eq!(result.next_seq, 1);
     }
@@ -493,7 +496,9 @@ mod tests {
         buf.truncate(buf.len() - 10);
 
         let mut file = MemFile::from_bytes(buf);
-        let result = recover::<XorHasher, _, 2, 32>(&mut file, &XorHasher).unwrap();
+        let result =
+            recover::<XorHasher, _, 2, 32>(&mut file, &TreeHasher::new(XorHasher))
+                .unwrap();
         assert_eq!(result.inner.size, 1);
         assert_eq!(result.next_seq, 1);
     }
@@ -503,7 +508,8 @@ mod tests {
         let buf = wal::serialize_header(4, 32);
 
         let mut file = MemFile::from_bytes(buf);
-        let result = recover::<XorHasher, _, 2, 32>(&mut file, &XorHasher);
+        let result =
+            recover::<XorHasher, _, 2, 32>(&mut file, &TreeHasher::new(XorHasher));
         assert!(matches!(result, Err(StorageError::ConfigMismatch { .. })));
     }
 
@@ -515,12 +521,18 @@ mod tests {
         }
 
         let mut file = MemFile::from_bytes(buf);
-        let recovered = recover::<XorHasher, _, 2, 32>(&mut file, &XorHasher).unwrap();
+        let recovered =
+            recover::<XorHasher, _, 2, 32>(&mut file, &TreeHasher::new(XorHasher))
+                .unwrap();
 
         let mut inner = TreeInner::<2, 32>::new();
         for i in 0..20u8 {
-            crate::LeanIMT::<XorHasher, 2, 32>::_insert(&mut inner, &XorHasher, leaf(i))
-                .unwrap();
+            crate::LeanIMT::<XorHasher, 2, 32>::_insert(
+                &mut inner,
+                &TreeHasher::new(XorHasher),
+                leaf(i),
+            )
+            .unwrap();
         }
 
         assert_eq!(recovered.inner.root, inner.root);
@@ -533,7 +545,9 @@ mod tests {
         let buf = wal::serialize_header(2, 32);
 
         let mut file = MemFile::from_bytes(buf);
-        let result = recover::<XorHasher, _, 2, 32>(&mut file, &XorHasher).unwrap();
+        let result =
+            recover::<XorHasher, _, 2, 32>(&mut file, &TreeHasher::new(XorHasher))
+                .unwrap();
         assert_eq!(result.inner.size, 0);
         assert_eq!(result.inner.root, None);
         assert_eq!(result.next_seq, 0);
@@ -561,7 +575,9 @@ mod tests {
         }
 
         let mut file = MemFile::from_bytes(buf);
-        let recovered = recover::<XorHasher, _, 2, 32>(&mut file, &XorHasher).unwrap();
+        let recovered =
+            recover::<XorHasher, _, 2, 32>(&mut file, &TreeHasher::new(XorHasher))
+                .unwrap();
         assert_eq!(recovered.inner.size, 10);
         assert_eq!(recovered.next_seq, 6);
 
@@ -570,7 +586,7 @@ mod tests {
         let all_leaves: Vec<Hash> = (0..10).map(leaf).collect();
         crate::LeanIMT::<XorHasher, 2, 32>::_insert_many(
             &mut inner,
-            &XorHasher,
+            &TreeHasher::new(XorHasher),
             &all_leaves,
         )
         .unwrap();

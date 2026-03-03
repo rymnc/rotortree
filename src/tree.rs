@@ -14,6 +14,7 @@ use crate::{
     Hash,
     Hasher,
     TreeError,
+    TreeHasher,
 };
 
 /// Number of hashes per chunk for structural sharing.
@@ -593,7 +594,10 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
 
     /// Recompute the root hash from level 0 data bottom-up
     #[cfg(feature = "storage")]
-    pub(crate) fn recompute_root<H: Hasher>(&self, hasher: &H) -> Option<Hash> {
+    pub(crate) fn recompute_root<H: Hasher>(
+        &self,
+        hasher: &TreeHasher<H>,
+    ) -> Option<Hash> {
         if self.size == 0 {
             return None;
         }
@@ -653,7 +657,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
         current: &[Hash],
         parent_idx: usize,
         len: usize,
-        hasher: &H,
+        hasher: &TreeHasher<H>,
     ) -> Hash {
         let start = parent_idx * N;
         let end = core::cmp::min(start + N, len);
@@ -688,7 +692,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
 /// - `N`: Branching factor (compile-time, must be >= 2)
 /// - `MAX_DEPTH`: Maximum tree depth (must be >= 1)
 pub struct LeanIMT<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
-    hasher: H,
+    hasher: TreeHasher<H>,
     #[cfg(not(feature = "concurrent"))]
     #[cfg_attr(docsrs, doc(cfg(not(feature = "concurrent"))))]
     inner: TreeInner<N, MAX_DEPTH>,
@@ -707,7 +711,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         let () = Self::_ASSERT_N;
         let () = Self::_ASSERT_DEPTH;
         Self {
-            hasher,
+            hasher: TreeHasher::new(hasher),
             inner: TreeInner::new(),
         }
     }
@@ -719,7 +723,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         let () = Self::_ASSERT_N;
         let () = Self::_ASSERT_DEPTH;
         Self {
-            hasher,
+            hasher: TreeHasher::new(hasher),
             inner: parking_lot::RwLock::new(TreeInner::new()),
         }
     }
@@ -805,7 +809,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     #[inline]
     pub(crate) fn _insert(
         inner: &mut TreeInner<N, MAX_DEPTH>,
-        hasher: &H,
+        hasher: &TreeHasher<H>,
         leaf: Hash,
     ) -> Result<Hash, TreeError> {
         let new_size = inner
@@ -820,7 +824,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         }
         let index = u64_to_usize(inner.size)?;
 
-        let mut node = leaf;
+        let mut node = hasher.hash_leaf(&leaf);
         let mut idx = index;
         for level in 0..depth {
             inner.levels[level].set(idx, node)?;
@@ -855,7 +859,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         child_level: &ChunkedLevel,
         parent_idx: usize,
         level_len: usize,
-        hasher: &H,
+        hasher: &TreeHasher<H>,
     ) -> Result<Hash, TreeError> {
         let group_start = parent_idx * N;
         let group_end = core::cmp::min(group_start + N, level_len);
@@ -879,7 +883,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         num_parents: usize,
         level_len: usize,
         is_root_level: bool,
-        hasher: &H,
+        hasher: &TreeHasher<H>,
         root: &mut Hash,
     ) -> Result<(), TreeError> {
         for parent_idx in start_parent..num_parents {
@@ -898,7 +902,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
     pub(crate) fn _insert_many(
         inner: &mut TreeInner<N, MAX_DEPTH>,
-        hasher: &H,
+        hasher: &TreeHasher<H>,
         leaves: &[Hash],
     ) -> Result<Hash, TreeError> {
         if leaves.is_empty() {
@@ -917,7 +921,9 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
             });
         }
 
-        inner.levels[0].extend(leaves)?;
+        let hashed_leaves: Vec<Hash> =
+            leaves.iter().map(|l| hasher.hash_leaf(l)).collect();
+        inner.levels[0].extend(&hashed_leaves)?;
 
         // allocate upfront
         {
@@ -1039,14 +1045,10 @@ mod tests {
     struct XorHasher;
 
     impl crate::Hasher for XorHasher {
-        const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
-
-        fn hash_children(&self, children: &[Hash]) -> Hash {
-            let mut result = Self::DOMAIN_SEPARATOR;
-            for child in children {
-                for (r, c) in result.iter_mut().zip(child.iter()) {
-                    *r ^= c;
-                }
+        fn hash_bytes(&self, data: &[u8]) -> Hash {
+            let mut result = [0u8; 32];
+            for (i, &b) in data.iter().enumerate() {
+                result[i % 32] ^= b;
             }
             result
         }
@@ -1155,24 +1157,25 @@ mod tests {
 
     #[test]
     fn insert_single_leaf_binary() {
+        let th = TreeHasher::new(XorHasher);
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
         let l = leaf(1);
         let root = tree.insert(l).unwrap();
-        assert_eq!(root, l); // single leaf = root (lifted)
+        assert_eq!(root, th.hash_leaf(&l)); // single leaf = hash_leaf(l)
         assert_eq!(tree.size(), 1);
         assert_eq!(tree.depth(), 0);
     }
 
     #[test]
     fn insert_two_leaves_binary() {
-        let hasher = XorHasher;
-        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(hasher.clone());
+        let th = TreeHasher::new(XorHasher);
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
         let l0 = leaf(1);
         let l1 = leaf(2);
         tree.insert(l0).unwrap();
         let root = tree.insert(l1).unwrap();
 
-        let expected = hasher.hash_children(&[l0, l1]);
+        let expected = th.hash_children(&[th.hash_leaf(&l0), th.hash_leaf(&l1)]);
         assert_eq!(root, expected);
         assert_eq!(tree.size(), 2);
         assert_eq!(tree.depth(), 1);
@@ -1180,8 +1183,8 @@ mod tests {
 
     #[test]
     fn insert_three_leaves_binary() {
-        let h = XorHasher;
-        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        let th = TreeHasher::new(XorHasher);
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
         let l0 = leaf(1);
         let l1 = leaf(2);
         let l2 = leaf(3);
@@ -1189,80 +1192,86 @@ mod tests {
         tree.insert(l1).unwrap();
         let root = tree.insert(l2).unwrap();
 
-        // Level 0: [l0, l1, l2]
-        // Level 1: [H(l0,l1), l2_lifted]
-        // Level 2: [H(H(l0,l1), l2)]
-        let h01 = h.hash_children(&[l0, l1]);
-        let expected = h.hash_children(&[h01, l2]);
+        // Level 0: [hl0, hl1, hl2]  (hash_leaf applied)
+        // Level 1: [H(hl0,hl1), hl2_lifted]
+        // Level 2: [H(H(hl0,hl1), hl2)]
+        let hl0 = th.hash_leaf(&l0);
+        let hl1 = th.hash_leaf(&l1);
+        let hl2 = th.hash_leaf(&l2);
+        let h01 = th.hash_children(&[hl0, hl1]);
+        let expected = th.hash_children(&[h01, hl2]);
         assert_eq!(root, expected);
         assert_eq!(tree.depth(), 2);
     }
 
     #[test]
     fn insert_four_leaves_binary() {
-        let h = XorHasher;
-        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
+        let th = TreeHasher::new(XorHasher);
+        let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
         let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
         for &l in &leaves {
             tree.insert(l).unwrap();
         }
 
-        // Level 0: [l0, l1, l2, l3]
-        // Level 1: [H(l0,l1), H(l2,l3)]
-        // Level 2: [H(H(l0,l1), H(l2,l3))]
-        let h01 = h.hash_children(&[leaves[0], leaves[1]]);
-        let h23 = h.hash_children(&[leaves[2], leaves[3]]);
-        let expected = h.hash_children(&[h01, h23]);
+        // Level 0: [hl0, hl1, hl2, hl3]  (hash_leaf applied)
+        // Level 1: [H(hl0,hl1), H(hl2,hl3)]
+        // Level 2: [H(H(hl0,hl1), H(hl2,hl3))]
+        let hl: Vec<Hash> = leaves.iter().map(|l| th.hash_leaf(l)).collect();
+        let h01 = th.hash_children(&[hl[0], hl[1]]);
+        let h23 = th.hash_children(&[hl[2], hl[3]]);
+        let expected = th.hash_children(&[h01, h23]);
         assert_eq!(tree.root(), Some(expected));
         assert_eq!(tree.depth(), 2);
     }
 
     #[test]
     fn insert_four_leaves_ternary() {
-        let h = XorHasher;
-        let mut tree = LeanIMT::<XorHasher, 3, 32>::new(h.clone());
+        let th = TreeHasher::new(XorHasher);
+        let mut tree = LeanIMT::<XorHasher, 3, 32>::new(XorHasher);
         let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
         for &l in &leaves {
             tree.insert(l).unwrap();
         }
 
-        // Level 0: [l0, l1, l2, l3]
-        // Level 1: [H(l0,l1,l2), l3_lifted]
-        // Level 2: [H(H(l0,l1,l2), l3)]
-        let h012 = h.hash_children(&[leaves[0], leaves[1], leaves[2]]);
-        let expected = h.hash_children(&[h012, leaves[3]]);
+        // Level 0: [hl0, hl1, hl2, hl3]  (hash_leaf applied)
+        // Level 1: [H(hl0,hl1,hl2), hl3_lifted]
+        // Level 2: [H(H(hl0,hl1,hl2), hl3)]
+        let hl: Vec<Hash> = leaves.iter().map(|l| th.hash_leaf(l)).collect();
+        let h012 = th.hash_children(&[hl[0], hl[1], hl[2]]);
+        let expected = th.hash_children(&[h012, hl[3]]);
         assert_eq!(tree.root(), Some(expected));
         assert_eq!(tree.depth(), 2);
     }
 
     #[test]
     fn insert_two_leaves_ternary() {
-        let h = XorHasher;
-        let mut tree = LeanIMT::<XorHasher, 3, 32>::new(h.clone());
+        let th = TreeHasher::new(XorHasher);
+        let mut tree = LeanIMT::<XorHasher, 3, 32>::new(XorHasher);
         let l0 = leaf(1);
         let l1 = leaf(2);
         tree.insert(l0).unwrap();
         let root = tree.insert(l1).unwrap();
 
-        let expected = h.hash_children(&[l0, l1]);
+        let expected = th.hash_children(&[th.hash_leaf(&l0), th.hash_leaf(&l1)]);
         assert_eq!(root, expected);
         assert_eq!(tree.depth(), 1);
     }
 
     #[test]
     fn insert_five_leaves_quaternary() {
-        let h = XorHasher;
-        let mut tree = LeanIMT::<XorHasher, 4, 32>::new(h.clone());
+        let th = TreeHasher::new(XorHasher);
+        let mut tree = LeanIMT::<XorHasher, 4, 32>::new(XorHasher);
         let leaves: Vec<Hash> = (1..=5).map(leaf).collect();
         for &l in &leaves {
             tree.insert(l).unwrap();
         }
 
-        // Level 0: [l0..l4]
-        // Level 1: [H(l0,l1,l2,l3), l4_lifted]
-        // Level 2: [H(H(l0,l1,l2,l3), l4)]
-        let h0123 = h.hash_children(&[leaves[0], leaves[1], leaves[2], leaves[3]]);
-        let expected = h.hash_children(&[h0123, leaves[4]]);
+        // Level 0: [hl0..hl4]  (hash_leaf applied)
+        // Level 1: [H(hl0,hl1,hl2,hl3), hl4_lifted]
+        // Level 2: [H(H(hl0,hl1,hl2,hl3), hl4)]
+        let hl: Vec<Hash> = leaves.iter().map(|l| th.hash_leaf(l)).collect();
+        let h0123 = th.hash_children(&[hl[0], hl[1], hl[2], hl[3]]);
+        let expected = th.hash_children(&[h0123, hl[4]]);
         assert_eq!(tree.root(), Some(expected));
         assert_eq!(tree.depth(), 2);
     }
@@ -1370,66 +1379,77 @@ mod tests {
 
         #[test]
         fn binary_four_leaves_known_vector() {
-            let h = Blake3Hasher;
-            let mut tree = LeanIMT::<Blake3Hasher, 2, 32>::new(h);
+            let th = TreeHasher::new(Blake3Hasher);
+            let mut tree = LeanIMT::<Blake3Hasher, 2, 32>::new(Blake3Hasher);
 
             let l0 = blake3_leaf(0);
             let l1 = blake3_leaf(1);
             let l2 = blake3_leaf(2);
             let l3 = blake3_leaf(3);
 
+            let hl0 = th.hash_leaf(&l0);
+            let hl1 = th.hash_leaf(&l1);
+            let hl2 = th.hash_leaf(&l2);
+            let hl3 = th.hash_leaf(&l3);
+
             let r1 = tree.insert(l0).unwrap();
-            assert_eq!(r1, l0);
+            assert_eq!(r1, hl0);
 
             let r2 = tree.insert(l1).unwrap();
-            let h01 = h.hash_children(&[l0, l1]);
+            let h01 = th.hash_children(&[hl0, hl1]);
             assert_eq!(r2, h01);
 
             let r3 = tree.insert(l2).unwrap();
-            let expected3 = h.hash_children(&[h01, l2]);
+            let expected3 = th.hash_children(&[h01, hl2]);
             assert_eq!(r3, expected3);
 
             let r4 = tree.insert(l3).unwrap();
-            let h23 = h.hash_children(&[l2, l3]);
-            let expected4 = h.hash_children(&[h01, h23]);
+            let h23 = th.hash_children(&[hl2, hl3]);
+            let expected4 = th.hash_children(&[h01, h23]);
             assert_eq!(r4, expected4);
         }
 
         #[test]
         fn ternary_four_leaves_known_vector() {
-            let h = Blake3Hasher;
-            let mut tree = LeanIMT::<Blake3Hasher, 3, 32>::new(h);
+            let th = TreeHasher::new(Blake3Hasher);
+            let mut tree = LeanIMT::<Blake3Hasher, 3, 32>::new(Blake3Hasher);
 
             let l0 = blake3_leaf(0);
             let l1 = blake3_leaf(1);
             let l2 = blake3_leaf(2);
             let l3 = blake3_leaf(3);
 
+            let hl0 = th.hash_leaf(&l0);
+            let hl1 = th.hash_leaf(&l1);
+            let hl2 = th.hash_leaf(&l2);
+            let hl3 = th.hash_leaf(&l3);
+
             tree.insert(l0).unwrap();
 
             let r2 = tree.insert(l1).unwrap();
-            assert_eq!(r2, h.hash_children(&[l0, l1]));
+            assert_eq!(r2, th.hash_children(&[hl0, hl1]));
 
             let r3 = tree.insert(l2).unwrap();
-            assert_eq!(r3, h.hash_children(&[l0, l1, l2]));
+            assert_eq!(r3, th.hash_children(&[hl0, hl1, hl2]));
 
             let r4 = tree.insert(l3).unwrap();
-            let h012 = h.hash_children(&[l0, l1, l2]);
-            assert_eq!(r4, h.hash_children(&[h012, l3]));
+            let h012 = th.hash_children(&[hl0, hl1, hl2]);
+            assert_eq!(r4, th.hash_children(&[h012, hl3]));
         }
 
         #[test]
         fn quaternary_five_leaves_known_vector() {
-            let h = Blake3Hasher;
-            let mut tree = LeanIMT::<Blake3Hasher, 4, 32>::new(h);
+            let th = TreeHasher::new(Blake3Hasher);
+            let mut tree = LeanIMT::<Blake3Hasher, 4, 32>::new(Blake3Hasher);
 
             let leaves: Vec<Hash> = (0..5).map(blake3_leaf).collect();
             for &l in &leaves {
                 tree.insert(l).unwrap();
             }
 
-            let h0123 = h.hash_children(&[leaves[0], leaves[1], leaves[2], leaves[3]]);
-            let expected = h.hash_children(&[h0123, leaves[4]]);
+            let hl: Vec<Hash> = leaves.iter().map(|l| th.hash_leaf(l)).collect();
+            let h0123 = th.hash_children(&[hl[0], hl[1], hl[2], hl[3]]);
+            let expected = th.hash_children(&[h0123, hl[4]]);
             assert_eq!(tree.root(), Some(expected));
         }
     }
@@ -1449,14 +1469,10 @@ mod concurrent_tests {
     struct XorHasher;
 
     impl crate::Hasher for XorHasher {
-        const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
-
-        fn hash_children(&self, children: &[Hash]) -> Hash {
-            let mut result = Self::DOMAIN_SEPARATOR;
-            for child in children {
-                for (r, c) in result.iter_mut().zip(child.iter()) {
-                    *r ^= c;
-                }
+        fn hash_bytes(&self, data: &[u8]) -> Hash {
+            let mut result = [0u8; 32];
+            for (i, &b) in data.iter().enumerate() {
+                result[i % 32] ^= b;
             }
             result
         }
@@ -1479,7 +1495,7 @@ mod concurrent_tests {
         let snap = tree.snapshot();
         for i in 0..10u64 {
             let proof = snap.generate_proof(i).unwrap();
-            assert!(proof.verify(&XorHasher).unwrap());
+            assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
         }
     }
 
@@ -1514,7 +1530,7 @@ mod concurrent_tests {
         let snap = tree.snapshot();
         for i in 0..total as u64 {
             let proof = snap.generate_proof(i).unwrap();
-            assert!(proof.verify(&XorHasher).unwrap());
+            assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
         }
     }
 
@@ -1546,7 +1562,7 @@ mod concurrent_tests {
                         }
                         for i in 0..size {
                             let proof = snap.generate_proof(i).unwrap();
-                            assert!(proof.verify(&XorHasher).unwrap());
+                            assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
                         }
                     }
                 })
@@ -1621,7 +1637,7 @@ mod concurrent_tests {
         let snap = tree.snapshot();
         for i in 0..total {
             let proof = snap.generate_proof(i).unwrap();
-            assert!(proof.verify(&XorHasher).unwrap());
+            assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
         }
     }
 }
@@ -1637,14 +1653,10 @@ mod parallel_tests {
     struct XorHasher;
 
     impl crate::Hasher for XorHasher {
-        const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
-
-        fn hash_children(&self, children: &[Hash]) -> Hash {
-            let mut result = Self::DOMAIN_SEPARATOR;
-            for child in children {
-                for (r, c) in result.iter_mut().zip(child.iter()) {
-                    *r ^= c;
-                }
+        fn hash_bytes(&self, data: &[u8]) -> Hash {
+            let mut result = [0u8; 32];
+            for (i, &b) in data.iter().enumerate() {
+                result[i % 32] ^= b;
             }
             result
         }
@@ -1717,7 +1729,7 @@ mod parallel_tests {
         let snap = tree.snapshot();
         for i in 0..2000u64 {
             let proof = snap.generate_proof(i).unwrap();
-            assert!(proof.verify(&XorHasher).unwrap());
+            assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
         }
     }
 

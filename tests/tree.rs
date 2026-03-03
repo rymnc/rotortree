@@ -5,20 +5,17 @@ use rotortree::{
     Hasher,
     LeanIMT,
     TreeError,
+    TreeHasher,
 };
 
 #[derive(Clone)]
 struct XorHasher;
 
 impl Hasher for XorHasher {
-    const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
-
-    fn hash_children(&self, children: &[Hash]) -> Hash {
-        let mut result = Self::DOMAIN_SEPARATOR;
-        for child in children {
-            for (r, c) in result.iter_mut().zip(child.iter()) {
-                *r ^= c;
-            }
+    fn hash_bytes(&self, data: &[u8]) -> Hash {
+        let mut result = [0u8; 32];
+        for (i, &b) in data.iter().enumerate() {
+            result[i % 32] ^= b;
         }
         result
     }
@@ -44,7 +41,7 @@ fn cross_chunk_get_group_ternary() {
     let proof = snap.generate_proof(127).unwrap();
 
     // then
-    assert!(proof.verify(&XorHasher).unwrap());
+    assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
 }
 
 /// 10 sequential + 300 batch exercises extend's 3-phase path (fill tail, full chunks, remainder).
@@ -95,7 +92,7 @@ fn segment_freeze_large_batch() {
     for &idx in &[0u64, 1000, 16383, 32767, 32999] {
         let proof = snap.generate_proof(idx).unwrap();
         assert!(
-            proof.verify(&XorHasher).unwrap(),
+            proof.verify(&TreeHasher::new(XorHasher)).unwrap(),
             "proof failed for idx {idx}"
         );
     }
@@ -126,9 +123,9 @@ fn snapshot_cow_on_shared_chunks() {
 
     let tree_snap = tree.snapshot();
     let p_old = snap.generate_proof(0).unwrap();
-    assert!(p_old.verify(&XorHasher).unwrap());
+    assert!(p_old.verify(&TreeHasher::new(XorHasher)).unwrap());
     let p_new = tree_snap.generate_proof(399).unwrap();
-    assert!(p_new.verify(&XorHasher).unwrap());
+    assert!(p_new.verify(&TreeHasher::new(XorHasher)).unwrap());
 }
 
 #[test]
@@ -147,9 +144,10 @@ fn snapshot_get_node_and_level_len() {
     assert_eq!(snap.level_len(depth), 1);
     assert_eq!(snap.level_len(depth + 1), 0);
 
-    assert_eq!(snap.get_node(0, 0).unwrap(), leaf(0));
-    assert_eq!(snap.get_node(0, 19).unwrap(), leaf(19));
-    let expected = XorHasher.hash_children(&[leaf(0), leaf(1)]);
+    let th = TreeHasher::new(XorHasher);
+    assert_eq!(snap.get_node(0, 0).unwrap(), th.hash_leaf(&leaf(0)));
+    assert_eq!(snap.get_node(0, 19).unwrap(), th.hash_leaf(&leaf(19)));
+    let expected = th.hash_children(&[th.hash_leaf(&leaf(0)), th.hash_leaf(&leaf(1))]);
     assert_eq!(snap.get_node(1, 0).unwrap(), expected);
 
     match snap.get_node(depth + 1, 0) {
@@ -171,8 +169,8 @@ fn proof_for_last_leaf() {
     let proof = snap.generate_proof(99).unwrap();
 
     // then
-    assert!(proof.verify(&XorHasher).unwrap());
-    assert_eq!(proof.leaf, leaf(99));
+    assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
+    assert_eq!(proof.leaf, TreeHasher::new(XorHasher).hash_leaf(&leaf(99)));
 }
 
 /// 4 leaves (depth=2), 5th leaf increases depth to 3. All proofs must verify.
@@ -194,7 +192,7 @@ fn proof_after_depth_increase() {
     for i in 0..5u64 {
         let proof = snap.generate_proof(i).unwrap();
         assert!(
-            proof.verify(&XorHasher).unwrap(),
+            proof.verify(&TreeHasher::new(XorHasher)).unwrap(),
             "proof failed for leaf {i}"
         );
     }
@@ -214,7 +212,7 @@ fn proof_verify_rejects_bad_level_count() {
     proof.level_count = 33; // > MAX_DEPTH
 
     // then
-    match proof.verify(&XorHasher) {
+    match proof.verify(&TreeHasher::new(XorHasher)) {
         Err(TreeError::InvalidProofDepth { .. }) => {}
         other => panic!("expected InvalidProofDepth, got {other:?}"),
     }
@@ -239,7 +237,7 @@ fn proof_verify_rejects_bad_sibling_count() {
     }
 
     // then
-    match proof.verify(&XorHasher) {
+    match proof.verify(&TreeHasher::new(XorHasher)) {
         Err(TreeError::MathError) => {}
         other => panic!("expected MathError, got {other:?}"),
     }
@@ -264,7 +262,7 @@ fn proof_verify_rejects_bad_position() {
     }
 
     // then
-    match proof.verify(&XorHasher) {
+    match proof.verify(&TreeHasher::new(XorHasher)) {
         Err(TreeError::MathError) => {}
         other => panic!("expected MathError, got {other:?}"),
     }
@@ -286,7 +284,7 @@ fn large_branching_factor_n16() {
     for &idx in &[0u64, 15, 16, 17, 255, 256, 299] {
         let proof = snap.generate_proof(idx).unwrap();
         assert!(
-            proof.verify(&XorHasher).unwrap(),
+            proof.verify(&TreeHasher::new(XorHasher)).unwrap(),
             "proof failed for idx {idx}"
         );
     }
@@ -418,7 +416,7 @@ fn concurrent_snapshot_proof_stress() {
                     }
                     for idx in [0, size / 2, size - 1] {
                         let proof = snap.generate_proof(idx).unwrap();
-                        assert!(proof.verify(&XorHasher).unwrap());
+                        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
                     }
                     if size >= 800 {
                         break;
@@ -433,6 +431,31 @@ fn concurrent_snapshot_proof_stress() {
     let snap = tree.snapshot();
     for i in 0..800u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
+}
+
+#[cfg(feature = "blake3")]
+#[test]
+fn domain_separation_prevents_second_preimage() {
+    use rotortree::Blake3Hasher;
+
+    // given
+    let leaves: Vec<Hash> = (0..4u32).map(leaf).collect();
+    let mut tree = LeanIMT::<Blake3Hasher, 2, 32>::new(Blake3Hasher);
+    tree.insert_many(&leaves).unwrap();
+    let original_root = tree.root().unwrap();
+
+    let snap = tree.snapshot();
+    let internal_left = snap.get_node(1, 0).unwrap();
+    let internal_right = snap.get_node(1, 1).unwrap();
+
+    // when
+    let mut attack_tree = LeanIMT::<Blake3Hasher, 2, 32>::new(Blake3Hasher);
+    attack_tree
+        .insert_many(&[internal_left, internal_right])
+        .unwrap();
+
+    // then
+    assert_ne!(original_root, attack_tree.root().unwrap());
 }

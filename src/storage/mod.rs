@@ -31,6 +31,7 @@ use crate::{
     Hash,
     Hasher,
     LeanIMT,
+    TreeHasher,
     tree::{
         CHUNK_SIZE,
         Chunk,
@@ -114,7 +115,7 @@ struct CheckpointCoord {
 
 /// Shared state
 struct Shared<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
-    hasher: H,
+    hasher: TreeHasher<H>,
     state: Mutex<DurableState<N, MAX_DEPTH>>,
     wal_file: Mutex<std::fs::File>,
     snapshot: ArcSwap<TreeSnapshot<N, MAX_DEPTH>>,
@@ -412,6 +413,8 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> RotorTree<H, N, MAX_DEPT
     pub fn open(hasher: H, config: RotorTreeConfig) -> Result<Self, RotorTreeError> {
         let () = Self::_ASSERT_N;
         let () = Self::_ASSERT_DEPTH;
+
+        let hasher = TreeHasher::new(hasher);
 
         std::fs::create_dir_all(&config.path)?;
 

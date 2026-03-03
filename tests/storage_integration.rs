@@ -13,6 +13,7 @@ use rotortree::{
     RotorTreeError,
     StorageError,
     TieringConfig,
+    TreeHasher,
     write_test_meta,
 };
 
@@ -20,14 +21,10 @@ use rotortree::{
 struct XorHasher;
 
 impl Hasher for XorHasher {
-    const DOMAIN_SEPARATOR: Hash = [0xAA; 32];
-
-    fn hash_children(&self, children: &[Hash]) -> Hash {
-        let mut result = Self::DOMAIN_SEPARATOR;
-        for child in children {
-            for (r, c) in result.iter_mut().zip(child.iter()) {
-                *r ^= c;
-            }
+    fn hash_bytes(&self, data: &[u8]) -> Hash {
+        let mut result = [0u8; 32];
+        for (i, &b) in data.iter().enumerate() {
+            result[i % 32] ^= b;
         }
         result
     }
@@ -130,7 +127,7 @@ fn many_inserts_close_reopen() {
     // Verify all proofs before close.
     for i in 0..n as u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     // when
     tree.close().unwrap();
@@ -144,7 +141,7 @@ fn many_inserts_close_reopen() {
     for i in 0..n as u64 {
         let proof = snap.generate_proof(i).unwrap();
         // then
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }
@@ -277,7 +274,7 @@ fn concurrent_insert_recover() {
     let snap = tree.snapshot();
     for i in 0..total as u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
 
     let root = tree.root();
@@ -322,7 +319,7 @@ fn recovery_continuation() {
     let snap = tree.snapshot();
     for i in 0..10u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }
@@ -387,7 +384,7 @@ fn interleaved_single_and_batch() {
     let snap = tree.snapshot();
     for i in 0..size {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }
@@ -419,7 +416,7 @@ fn first_insert_after_recovery() {
     let snap = tree.snapshot();
     for i in 0..4u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }
@@ -489,7 +486,7 @@ fn checkpoint_round_trip() {
     // then
     for i in 0..200u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }
@@ -522,7 +519,7 @@ fn checkpoint_then_more_inserts() {
     let snap = tree.snapshot();
     for i in 0..100u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }
@@ -592,7 +589,7 @@ fn checkpoint_on_close_policy() {
     // then
     for i in 0..30u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }
@@ -707,7 +704,7 @@ fn checkpoint_idempotent() {
     // then
     for i in 0..30u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }
@@ -743,7 +740,7 @@ fn checkpoint_after_recovery() {
     let snap = tree.snapshot();
     for i in 0..30u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }
@@ -896,9 +893,9 @@ fn level_pinning() {
     assert_eq!(tree.size(), 250);
     let snap = tree.snapshot();
     let proof_0 = snap.generate_proof(0).unwrap();
-    assert!(proof_0.verify(&XorHasher).unwrap());
+    assert!(proof_0.verify(&TreeHasher::new(XorHasher)).unwrap());
     let proof_last = snap.generate_proof(249).unwrap();
-    assert!(proof_last.verify(&XorHasher).unwrap());
+    assert!(proof_last.verify(&TreeHasher::new(XorHasher)).unwrap());
 
     let root = tree.root();
     tree.close().unwrap();
@@ -945,13 +942,13 @@ fn mmap_snapshot_isolation() {
     assert_eq!(snap1.root(), root1);
     assert_eq!(snap1.size(), size1);
     let proof_0 = snap1.generate_proof(0).unwrap();
-    assert!(proof_0.verify(&XorHasher).unwrap());
+    assert!(proof_0.verify(&TreeHasher::new(XorHasher)).unwrap());
     let proof_199 = snap1.generate_proof(199).unwrap();
-    assert!(proof_199.verify(&XorHasher).unwrap());
+    assert!(proof_199.verify(&TreeHasher::new(XorHasher)).unwrap());
 
     let snap2 = tree.snapshot();
     let proof_249 = snap2.generate_proof(249).unwrap();
-    assert!(proof_249.verify(&XorHasher).unwrap());
+    assert!(proof_249.verify(&TreeHasher::new(XorHasher)).unwrap());
 
     tree.close().unwrap();
 }
@@ -1060,7 +1057,7 @@ fn multiple_checkpoint_cycles() {
     let snap = tree.snapshot();
     for &idx in &[0u64, 49, 50, 99, 100, 149] {
         let proof = snap.generate_proof(idx).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }
@@ -1109,7 +1106,7 @@ fn large_batch_storage_segment_freeze() {
     for &idx in &[0u64, 1000, 16383, 32767, 32999] {
         let proof = snap.generate_proof(idx).unwrap();
         assert!(
-            proof.verify(&XorHasher).unwrap(),
+            proof.verify(&TreeHasher::new(XorHasher)).unwrap(),
             "proof failed for idx {idx}"
         );
     }
@@ -1149,7 +1146,7 @@ fn insert_many_after_checkpoint_recovery() {
     let snap = tree.snapshot();
     for &idx in &[0u64, 50, 99, 100, 150, 199] {
         let proof = snap.generate_proof(idx).unwrap();
-        assert!(proof.verify(&XorHasher).unwrap());
+        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
     }
     tree.close().unwrap();
 }

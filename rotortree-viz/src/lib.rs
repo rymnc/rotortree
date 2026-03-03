@@ -1,4 +1,4 @@
-use rotortree::{Blake3Hasher, Hash, LeanIMT, TreeSnapshot};
+use rotortree::{Blake3Hasher, Hash, LeanIMT, TreeHasher, TreeSnapshot};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -46,8 +46,9 @@ fn hex_short(h: &Hash) -> String {
 }
 
 fn hash_from_js(data: &[u8]) -> Hash {
-    let hasher = Blake3Hasher;
-    rotortree::Hasher::hash_children(&hasher, &[*blake3::hash(data).as_bytes()])
+    let tree_hasher = TreeHasher::new(Blake3Hasher);
+    let raw = *blake3::hash(data).as_bytes();
+    tree_hasher.hash_leaf(&raw)
 }
 
 /// Compute the touched (level, index) path for an insert at `old_size`.

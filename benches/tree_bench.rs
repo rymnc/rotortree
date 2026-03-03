@@ -1,6 +1,7 @@
 use rotortree::{
     Blake3Hasher,
     LeanIMT,
+    TreeHasher,
 };
 
 mod common;
@@ -174,9 +175,9 @@ fn bench_verify_proof(n_values: Vec<usize>) {
                     tree.insert_many(&leaves).unwrap();
                     let snap = tree.snapshot();
                     let proof = snap.generate_proof(0).unwrap();
-                    let hasher = Blake3Hasher;
+                    let th = TreeHasher::new(Blake3Hasher);
                     bencher.bench_local(|| {
-                        divan::black_box(proof.verify(&hasher).unwrap());
+                        divan::black_box(proof.verify(&th).unwrap());
                     });
                 }
             }
