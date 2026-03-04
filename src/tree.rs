@@ -295,74 +295,48 @@ impl ChunkedLevel {
         Ok(())
     }
 
-    fn extend_hashed<H: crate::Hasher>(
-        &mut self,
-        leaves: &[Hash],
-        hasher: &crate::TreeHasher<H>,
-    ) -> Result<(), TreeError> {
-        if leaves.is_empty() {
+    fn extend(&mut self, values: &[Hash]) -> Result<(), TreeError> {
+        if values.is_empty() {
             return Ok(());
         }
         let new_len = self
             .len
-            .checked_add(leaves.len())
+            .checked_add(values.len())
             .ok_or(TreeError::MathError)?;
 
-        let mut remaining = leaves;
+        let mut remaining = values;
 
+        // fill current tail
         if self.tail_len > 0 {
             let space = CHUNK_SIZE - self.tail_len;
-            let n = space.min(remaining.len());
-            for (dst, src) in self.tail[self.tail_len..].iter_mut().zip(&remaining[..n]) {
-                *dst = hasher.hash_leaf(src);
-            }
-            self.tail_len += n;
-            remaining = &remaining[n..];
+            let to_copy = space.min(remaining.len());
+            self.tail[self.tail_len..self.tail_len + to_copy]
+                .copy_from_slice(&remaining[..to_copy]);
+            self.tail_len += to_copy;
+            remaining = &remaining[to_copy..];
             if self.tail_len == CHUNK_SIZE {
                 self.promote_tail();
             }
         }
 
-        let chunk_leaves = remaining.chunks_exact(CHUNK_SIZE);
-        let leftover = chunk_leaves.remainder();
-
-        let hash_chunk = |cl: &[Hash]| -> Chunk {
-            let mut data = [[0u8; 32]; CHUNK_SIZE];
-            for (d, s) in data.iter_mut().zip(cl) {
-                *d = hasher.hash_leaf(s);
+        // full chunks — bypass tail
+        let full_chunks = remaining.len() / CHUNK_SIZE;
+        if full_chunks > 0 {
+            self.pending.reserve(full_chunks.min(CHUNKS_PER_SEGMENT));
+            for i in 0..full_chunks {
+                let start = i * CHUNK_SIZE;
+                let chunk: [Hash; CHUNK_SIZE] = remaining[start..start + CHUNK_SIZE]
+                    .try_into()
+                    .expect("slice len == CHUNK_SIZE; qed");
+                self.push_chunk(Chunk::new_memory(chunk));
             }
-            Chunk::new_memory(data)
-        };
-
-        #[cfg(feature = "parallel")]
-        let chunks: Vec<Chunk> = {
-            if remaining.len() >= parallel_threshold() {
-                use rayon::prelude::*;
-                chunk_leaves
-                    .collect::<Vec<_>>()
-                    .into_par_iter()
-                    .map(|cl| hash_chunk(cl))
-                    .collect()
-            } else {
-                chunk_leaves.map(hash_chunk).collect()
-            }
-        };
-
-        #[cfg(not(feature = "parallel"))]
-        let chunks: Vec<Chunk> = chunk_leaves.map(hash_chunk).collect();
-
-        if !chunks.is_empty() {
-            self.pending.reserve(chunks.len().min(CHUNKS_PER_SEGMENT));
-            for chunk in chunks {
-                self.push_chunk(chunk);
-            }
+            remaining = &remaining[full_chunks * CHUNK_SIZE..];
         }
 
-        if !leftover.is_empty() {
-            for (dst, src) in self.tail.iter_mut().zip(leftover) {
-                *dst = hasher.hash_leaf(src);
-            }
-            self.tail_len = leftover.len();
+        // tail remainder
+        if !remaining.is_empty() {
+            self.tail[..remaining.len()].copy_from_slice(remaining);
+            self.tail_len = remaining.len();
         }
 
         self.len = new_len;
@@ -852,7 +826,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         }
         let index = u64_to_usize(inner.size)?;
 
-        let mut node = hasher.hash_leaf(&leaf);
+        let mut node = leaf;
         let mut idx = index;
         for level in 0..depth {
             inner.levels[level].set(idx, node)?;
@@ -949,7 +923,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
             });
         }
 
-        inner.levels[0].extend_hashed(leaves, hasher)?;
+        inner.levels[0].extend(leaves)?;
 
         // allocate upfront
         {
@@ -995,24 +969,27 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
                     par_buf.clear();
                     par_buf.reserve(work);
-                    // SAFETY: every slot is overwritten by the parallel
-                    // loop below before being read in the writeback loop.
-                    unsafe { par_buf.set_len(work) };
 
-                    par_buf.par_chunks_mut(PAR_CHUNK_SIZE).enumerate().for_each(
+                    let spare = &mut par_buf.spare_capacity_mut()[..work];
+                    spare.par_chunks_mut(PAR_CHUNK_SIZE).enumerate().for_each(
                         |(ci, chunk)| {
                             let base = start_parent + ci * PAR_CHUNK_SIZE;
                             for (i, slot) in chunk.iter_mut().enumerate() {
-                                *slot = Self::_compute_parent(
-                                    child_level,
-                                    base + i,
-                                    level_len,
-                                    hasher,
-                                )
-                                .expect("ensure_len guarantees valid indices");
+                                slot.write(
+                                    Self::_compute_parent(
+                                        child_level,
+                                        base + i,
+                                        level_len,
+                                        hasher,
+                                    )
+                                    .expect("ensure_len guarantees valid indices"),
+                                );
                             }
                         },
                     );
+                    // SAFETY: the parallel loop above initialised every
+                    // element in `spare[..work]` via `MaybeUninit::write`.
+                    unsafe { par_buf.set_len(work) };
 
                     let parent_level = &mut parent_levels[0];
                     for (i, &parent) in par_buf.iter().enumerate() {
@@ -1168,11 +1145,10 @@ mod tests {
 
     #[test]
     fn insert_single_leaf_binary() {
-        let th = TreeHasher::new(XorHasher);
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
         let l = leaf(1);
         let root = tree.insert(l).unwrap();
-        assert_eq!(root, th.hash_leaf(&l)); // single leaf = hash_leaf(l)
+        assert_eq!(root, l); // single leaf stored as-is
         assert_eq!(tree.size(), 1);
         assert_eq!(tree.depth(), 0);
     }
@@ -1186,7 +1162,7 @@ mod tests {
         tree.insert(l0).unwrap();
         let root = tree.insert(l1).unwrap();
 
-        let expected = th.hash_children(&[th.hash_leaf(&l0), th.hash_leaf(&l1)]);
+        let expected = th.hash_children(&[l0, l1]);
         assert_eq!(root, expected);
         assert_eq!(tree.size(), 2);
         assert_eq!(tree.depth(), 1);
@@ -1203,14 +1179,11 @@ mod tests {
         tree.insert(l1).unwrap();
         let root = tree.insert(l2).unwrap();
 
-        // Level 0: [hl0, hl1, hl2]  (hash_leaf applied)
-        // Level 1: [H(hl0,hl1), hl2_lifted]
-        // Level 2: [H(H(hl0,hl1), hl2)]
-        let hl0 = th.hash_leaf(&l0);
-        let hl1 = th.hash_leaf(&l1);
-        let hl2 = th.hash_leaf(&l2);
-        let h01 = th.hash_children(&[hl0, hl1]);
-        let expected = th.hash_children(&[h01, hl2]);
+        // Level 0: [l0, l1, l2]
+        // Level 1: [H(l0,l1), l2_lifted]
+        // Level 2: [H(H(l0,l1), l2)]
+        let h01 = th.hash_children(&[l0, l1]);
+        let expected = th.hash_children(&[h01, l2]);
         assert_eq!(root, expected);
         assert_eq!(tree.depth(), 2);
     }
@@ -1224,12 +1197,11 @@ mod tests {
             tree.insert(l).unwrap();
         }
 
-        // Level 0: [hl0, hl1, hl2, hl3]  (hash_leaf applied)
-        // Level 1: [H(hl0,hl1), H(hl2,hl3)]
-        // Level 2: [H(H(hl0,hl1), H(hl2,hl3))]
-        let hl: Vec<Hash> = leaves.iter().map(|l| th.hash_leaf(l)).collect();
-        let h01 = th.hash_children(&[hl[0], hl[1]]);
-        let h23 = th.hash_children(&[hl[2], hl[3]]);
+        // Level 0: [l0, l1, l2, l3]
+        // Level 1: [H(l0,l1), H(l2,l3)]
+        // Level 2: [H(H(l0,l1), H(l2,l3))]
+        let h01 = th.hash_children(&[leaves[0], leaves[1]]);
+        let h23 = th.hash_children(&[leaves[2], leaves[3]]);
         let expected = th.hash_children(&[h01, h23]);
         assert_eq!(tree.root(), Some(expected));
         assert_eq!(tree.depth(), 2);
@@ -1244,12 +1216,11 @@ mod tests {
             tree.insert(l).unwrap();
         }
 
-        // Level 0: [hl0, hl1, hl2, hl3]  (hash_leaf applied)
-        // Level 1: [H(hl0,hl1,hl2), hl3_lifted]
-        // Level 2: [H(H(hl0,hl1,hl2), hl3)]
-        let hl: Vec<Hash> = leaves.iter().map(|l| th.hash_leaf(l)).collect();
-        let h012 = th.hash_children(&[hl[0], hl[1], hl[2]]);
-        let expected = th.hash_children(&[h012, hl[3]]);
+        // Level 0: [l0, l1, l2, l3]
+        // Level 1: [H(l0,l1,l2), l3_lifted]
+        // Level 2: [H(H(l0,l1,l2), l3)]
+        let h012 = th.hash_children(&[leaves[0], leaves[1], leaves[2]]);
+        let expected = th.hash_children(&[h012, leaves[3]]);
         assert_eq!(tree.root(), Some(expected));
         assert_eq!(tree.depth(), 2);
     }
@@ -1263,7 +1234,7 @@ mod tests {
         tree.insert(l0).unwrap();
         let root = tree.insert(l1).unwrap();
 
-        let expected = th.hash_children(&[th.hash_leaf(&l0), th.hash_leaf(&l1)]);
+        let expected = th.hash_children(&[l0, l1]);
         assert_eq!(root, expected);
         assert_eq!(tree.depth(), 1);
     }
@@ -1277,12 +1248,11 @@ mod tests {
             tree.insert(l).unwrap();
         }
 
-        // Level 0: [hl0..hl4]  (hash_leaf applied)
-        // Level 1: [H(hl0,hl1,hl2,hl3), hl4_lifted]
-        // Level 2: [H(H(hl0,hl1,hl2,hl3), hl4)]
-        let hl: Vec<Hash> = leaves.iter().map(|l| th.hash_leaf(l)).collect();
-        let h0123 = th.hash_children(&[hl[0], hl[1], hl[2], hl[3]]);
-        let expected = th.hash_children(&[h0123, hl[4]]);
+        // Level 0: [l0..l4]
+        // Level 1: [H(l0,l1,l2,l3), l4_lifted]
+        // Level 2: [H(H(l0,l1,l2,l3), l4)]
+        let h0123 = th.hash_children(&[leaves[0], leaves[1], leaves[2], leaves[3]]);
+        let expected = th.hash_children(&[h0123, leaves[4]]);
         assert_eq!(tree.root(), Some(expected));
         assert_eq!(tree.depth(), 2);
     }
@@ -1398,24 +1368,19 @@ mod tests {
             let l2 = blake3_leaf(2);
             let l3 = blake3_leaf(3);
 
-            let hl0 = th.hash_leaf(&l0);
-            let hl1 = th.hash_leaf(&l1);
-            let hl2 = th.hash_leaf(&l2);
-            let hl3 = th.hash_leaf(&l3);
-
             let r1 = tree.insert(l0).unwrap();
-            assert_eq!(r1, hl0);
+            assert_eq!(r1, l0);
 
             let r2 = tree.insert(l1).unwrap();
-            let h01 = th.hash_children(&[hl0, hl1]);
+            let h01 = th.hash_children(&[l0, l1]);
             assert_eq!(r2, h01);
 
             let r3 = tree.insert(l2).unwrap();
-            let expected3 = th.hash_children(&[h01, hl2]);
+            let expected3 = th.hash_children(&[h01, l2]);
             assert_eq!(r3, expected3);
 
             let r4 = tree.insert(l3).unwrap();
-            let h23 = th.hash_children(&[hl2, hl3]);
+            let h23 = th.hash_children(&[l2, l3]);
             let expected4 = th.hash_children(&[h01, h23]);
             assert_eq!(r4, expected4);
         }
@@ -1430,22 +1395,17 @@ mod tests {
             let l2 = blake3_leaf(2);
             let l3 = blake3_leaf(3);
 
-            let hl0 = th.hash_leaf(&l0);
-            let hl1 = th.hash_leaf(&l1);
-            let hl2 = th.hash_leaf(&l2);
-            let hl3 = th.hash_leaf(&l3);
-
             tree.insert(l0).unwrap();
 
             let r2 = tree.insert(l1).unwrap();
-            assert_eq!(r2, th.hash_children(&[hl0, hl1]));
+            assert_eq!(r2, th.hash_children(&[l0, l1]));
 
             let r3 = tree.insert(l2).unwrap();
-            assert_eq!(r3, th.hash_children(&[hl0, hl1, hl2]));
+            assert_eq!(r3, th.hash_children(&[l0, l1, l2]));
 
             let r4 = tree.insert(l3).unwrap();
-            let h012 = th.hash_children(&[hl0, hl1, hl2]);
-            assert_eq!(r4, th.hash_children(&[h012, hl3]));
+            let h012 = th.hash_children(&[l0, l1, l2]);
+            assert_eq!(r4, th.hash_children(&[h012, l3]));
         }
 
         #[test]
@@ -1458,9 +1418,8 @@ mod tests {
                 tree.insert(l).unwrap();
             }
 
-            let hl: Vec<Hash> = leaves.iter().map(|l| th.hash_leaf(l)).collect();
-            let h0123 = th.hash_children(&[hl[0], hl[1], hl[2], hl[3]]);
-            let expected = th.hash_children(&[h0123, hl[4]]);
+            let h0123 = th.hash_children(&[leaves[0], leaves[1], leaves[2], leaves[3]]);
+            let expected = th.hash_children(&[h0123, leaves[4]]);
             assert_eq!(tree.root(), Some(expected));
         }
     }

@@ -126,9 +126,9 @@ fn snapshot_get_node_and_level_len() {
     assert_eq!(snap.level_len(depth + 1), 0);
 
     let th = TreeHasher::new(XorHasher);
-    assert_eq!(snap.get_node(0, 0).unwrap(), th.hash_leaf(&leaf(0)));
-    assert_eq!(snap.get_node(0, 19).unwrap(), th.hash_leaf(&leaf(19)));
-    let expected = th.hash_children(&[th.hash_leaf(&leaf(0)), th.hash_leaf(&leaf(1))]);
+    assert_eq!(snap.get_node(0, 0).unwrap(), leaf(0));
+    assert_eq!(snap.get_node(0, 19).unwrap(), leaf(19));
+    let expected = th.hash_children(&[leaf(0), leaf(1)]);
     assert_eq!(snap.get_node(1, 0).unwrap(), expected);
 
     match snap.get_node(depth + 1, 0) {
@@ -151,7 +151,7 @@ fn proof_for_last_leaf() {
 
     // then
     assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
-    assert_eq!(proof.leaf, TreeHasher::new(XorHasher).hash_leaf(&leaf(99)));
+    assert_eq!(proof.leaf, leaf(99));
 }
 
 /// 4 leaves (depth=2), 5th leaf increases depth to 3. All proofs must verify.
@@ -416,27 +416,28 @@ fn concurrent_snapshot_proof_stress() {
     }
 }
 
+/// Domain separation for internal nodes: `hash_children` uses `0x01 || len`
 #[cfg(feature = "blake3")]
 #[test]
-fn domain_separation_prevents_second_preimage() {
+fn domain_separation_internal_nodes() {
     use rotortree::Blake3Hasher;
 
     // given
     let leaves: Vec<Hash> = (0..4u32).map(leaf).collect();
     let mut tree = LeanIMT::<Blake3Hasher, 2, 32>::new(Blake3Hasher);
     tree.insert_many(&leaves).unwrap();
-    let original_root = tree.root().unwrap();
 
     let snap = tree.snapshot();
     let internal_left = snap.get_node(1, 0).unwrap();
     let internal_right = snap.get_node(1, 1).unwrap();
 
     // when
-    let mut attack_tree = LeanIMT::<Blake3Hasher, 2, 32>::new(Blake3Hasher);
-    attack_tree
-        .insert_many(&[internal_left, internal_right])
-        .unwrap();
+    let th = TreeHasher::new(Blake3Hasher);
+    let h01 = th.hash_children(&[leaves[0], leaves[1]]);
+    let h23 = th.hash_children(&[leaves[2], leaves[3]]);
 
     // then
-    assert_ne!(original_root, attack_tree.root().unwrap());
+    assert_eq!(internal_left, h01);
+    assert_eq!(internal_right, h23);
+    assert_eq!(tree.root().unwrap(), th.hash_children(&[h01, h23]));
 }

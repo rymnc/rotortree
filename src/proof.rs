@@ -648,9 +648,8 @@ mod tests {
         let snap = tree.snapshot();
 
         let proof = snap.generate_proof(0).unwrap();
-        let hl = th.hash_leaf(&l);
-        assert_eq!(proof.leaf, hl);
-        assert_eq!(proof.root, hl);
+        assert_eq!(proof.leaf, l);
+        assert_eq!(proof.root, l);
         assert_eq!(proof.leaf_index, 0);
         assert_eq!(proof.level_count, 0);
         assert!(proof.verify(&th).unwrap());
@@ -668,18 +667,18 @@ mod tests {
         let snap = tree.snapshot();
 
         let p0 = snap.generate_proof(0).unwrap();
-        assert_eq!(p0.leaf, th.hash_leaf(&l0));
+        assert_eq!(p0.leaf, l0);
         assert_eq!(p0.level_count, 1);
         assert_eq!(p0.levels[0].position, 0);
         assert_eq!(p0.levels[0].sibling_count, 1);
-        assert_eq!(p0.levels[0].siblings[0], th.hash_leaf(&l1));
+        assert_eq!(p0.levels[0].siblings[0], l1);
         assert!(p0.verify(&th).unwrap());
 
         let p1 = snap.generate_proof(1).unwrap();
-        assert_eq!(p1.leaf, th.hash_leaf(&l1));
+        assert_eq!(p1.leaf, l1);
         assert_eq!(p1.levels[0].position, 1);
         assert_eq!(p1.levels[0].sibling_count, 1);
-        assert_eq!(p1.levels[0].siblings[0], th.hash_leaf(&l0));
+        assert_eq!(p1.levels[0].siblings[0], l0);
         assert!(p1.verify(&th).unwrap());
     }
 
@@ -699,7 +698,7 @@ mod tests {
         let p = snap.generate_proof(2).unwrap();
         assert_eq!(p.level_count, 2);
         assert_eq!(p.levels[0].sibling_count, 0);
-        let h01 = th.hash_children(&[th.hash_leaf(&l0), th.hash_leaf(&l1)]);
+        let h01 = th.hash_children(&[l0, l1]);
         assert_eq!(p.levels[1].position, 1);
         assert_eq!(p.levels[1].sibling_count, 1);
         assert_eq!(p.levels[1].siblings[0], h01);
@@ -720,7 +719,7 @@ mod tests {
         for i in 0..4u64 {
             let p = snap.generate_proof(i).unwrap();
             assert!(p.verify(&th).unwrap());
-            assert_eq!(p.leaf, th.hash_leaf(&leaves[i as usize]));
+            assert_eq!(p.leaf, leaves[i as usize]);
         }
     }
 

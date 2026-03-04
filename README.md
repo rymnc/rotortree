@@ -39,7 +39,8 @@ the tree design itself is heavily inspired by [lean-imt](https://zkkit.org/leani
   - which are quite feasible, but expensive. just use a new tree per generation and encode your nullifiers with the generation pls
   - in most cases, you just need the tree in memory without crash persistence (as long as there is a bootstrapping sync mechanism), just use the single threaded variant, its _MUCH_ better if you have a low number of insertions
   - writes go to the wal + memory, reads are always from memory or mmap. one cannot do an apples to apples comparison with other merkle tree dbs that read from disk on every query
-- few dependencies ~ 65 (active + transitive, excluding dev deps)
+- assumes that leaves are prehashed, partial support for rfc 6962 only for internal nodes
+- few dependencies ~ 65 (active + transitive, excluding dev deps), zero deps for just the algorithm
 
 <!-- ANCHOR_END: design --> 
 

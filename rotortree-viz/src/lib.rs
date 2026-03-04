@@ -46,9 +46,7 @@ fn hex_short(h: &Hash) -> String {
 }
 
 fn hash_from_js(data: &[u8]) -> Hash {
-    let tree_hasher = TreeHasher::new(Blake3Hasher);
-    let raw = *blake3::hash(data).as_bytes();
-    tree_hasher.hash_leaf(&raw)
+    *blake3::hash(data).as_bytes()
 }
 
 /// Compute the touched (level, index) path for an insert at `old_size`.
