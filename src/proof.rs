@@ -527,26 +527,10 @@ mod tests {
     use std::vec::Vec;
 
     use super::*;
-    use crate::LeanIMT;
-
-    #[derive(Clone)]
-    struct XorHasher;
-
-    impl crate::Hasher for XorHasher {
-        fn hash_bytes(&self, data: &[u8]) -> Hash {
-            let mut result = [0u8; 32];
-            for (i, &b) in data.iter().enumerate() {
-                result[i % 32] ^= b;
-            }
-            result
-        }
-    }
-
-    fn leaf(n: u8) -> Hash {
-        let mut h = [0u8; 32];
-        h[0] = n;
-        h
-    }
+    use crate::{
+        LeanIMT,
+        test_util::*,
+    };
 
     fn build_snapshots<const N: usize, const MAX_DEPTH: usize>(
         leaves: &[Hash],
@@ -564,7 +548,7 @@ mod tests {
     }
 
     /// Verify generate + verify for every (old, new) pair up to `count` leaves.
-    fn verify_consistency_all_pairs<const N: usize>(count: u8) {
+    fn verify_consistency_all_pairs<const N: usize>(count: u32) {
         let leaves: Vec<Hash> = (1..=count).map(leaf).collect();
         let snaps = build_snapshots::<N, 32>(&leaves);
         for i in 0..snaps.len() {
@@ -586,7 +570,7 @@ mod tests {
 
     /// Verify update_inclusion_proof for every (old, new, member) triple,
     /// and assert the result equals a freshly generated proof.
-    fn verify_update_all_pairs<const N: usize>(count: u8) {
+    fn verify_update_all_pairs<const N: usize>(count: u32) {
         let leaves: Vec<Hash> = (1..=count).map(leaf).collect();
         let snaps = build_snapshots::<N, 32>(&leaves);
         for i in 0..snaps.len() {
@@ -826,7 +810,7 @@ mod tests {
     }
 
     #[cfg(feature = "wincode")]
-    fn verify_wincode_proof_round_trip<const N: usize>(count: u8) {
+    fn verify_wincode_proof_round_trip<const N: usize>(count: u32) {
         let leaves: Vec<Hash> = (1..=count).map(leaf).collect();
         let mut tree = LeanIMT::<XorHasher, N, 32>::new(XorHasher);
         for &l in &leaves {
@@ -1124,7 +1108,7 @@ mod tests {
         let h = XorHasher;
         let th = TreeHasher::new(XorHasher);
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
-        for i in 1..=4 {
+        for i in 1..=4u32 {
             tree.insert(leaf(i)).unwrap();
         }
         let snap = tree.snapshot();

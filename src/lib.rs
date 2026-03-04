@@ -18,6 +18,7 @@ use {
     crabtime as _,
     divan as _,
     proptest as _,
+    rotortree as _,
     tempfile as _,
     tikv_jemallocator as _,
 };
@@ -25,6 +26,8 @@ use {
 mod error;
 mod hash;
 mod proof;
+#[cfg(any(test, feature = "test-helpers"))]
+pub mod test_util;
 mod tree;
 
 pub mod adapters;
@@ -36,6 +39,7 @@ pub mod storage;
 pub use error::TreeError;
 pub use hash::{
     Hash,
+    HashState,
     Hasher,
     TreeHasher,
 };

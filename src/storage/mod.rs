@@ -143,22 +143,37 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> Shared<H, N, MAX_DEPTH> 
             (buf, last_seq)
         };
 
-        let result = (&*wal_file)
-            .write_all(&buf)
-            .and_then(|()| wal_file.sync_data());
+        let pos_before = (&*wal_file).stream_position().map_err(StorageError::Io)?;
 
-        match result {
+        match (&*wal_file).write_all(&buf) {
             Ok(()) => {
+                let sync_result = wal_file.sync_data();
+
                 let mut state = self.state.lock();
                 if state.buffer.is_empty() {
                     let mut returned = buf;
                     returned.clear();
                     state.buffer = returned;
                 }
-                self.durability.mark_flushed(last_seq);
-                Ok(())
+
+                match sync_result {
+                    Ok(()) => {
+                        self.durability.mark_flushed(last_seq);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        let err = Arc::new(e);
+                        self.bg_error.store(Arc::new(Some(
+                            error::BackgroundError::FlushFailed(Arc::clone(&err)),
+                        )));
+                        Err(StorageError::FlushFailed(err))
+                    }
+                }
             }
             Err(e) => {
+                let _ = (&*wal_file).seek(SeekFrom::Start(pos_before));
+                let _ = wal_file.set_len(pos_before);
+
                 let mut state = self.state.lock();
                 if state.buffer.is_empty() {
                     state.buffer = buf;

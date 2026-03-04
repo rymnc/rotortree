@@ -3,23 +3,10 @@
 use proptest::prelude::*;
 use rotortree::{
     Hash,
-    Hasher,
     LeanIMT,
     TreeHasher,
+    test_util::XorHasher,
 };
-
-#[derive(Clone)]
-struct XorHasher;
-
-impl Hasher for XorHasher {
-    fn hash_bytes(&self, data: &[u8]) -> Hash {
-        let mut result = [0u8; 32];
-        for (i, &b) in data.iter().enumerate() {
-            result[i % 32] ^= b;
-        }
-        result
-    }
-}
 
 fn leaves_strategy(max: usize) -> impl Strategy<Value = Vec<Hash>> {
     prop::collection::vec(prop::array::uniform32(any::<u8>()), 1..=max)

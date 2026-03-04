@@ -1040,25 +1040,7 @@ mod tests {
     use std::vec::Vec;
 
     use super::*;
-
-    #[derive(Clone)]
-    struct XorHasher;
-
-    impl crate::Hasher for XorHasher {
-        fn hash_bytes(&self, data: &[u8]) -> Hash {
-            let mut result = [0u8; 32];
-            for (i, &b) in data.iter().enumerate() {
-                result[i % 32] ^= b;
-            }
-            result
-        }
-    }
-
-    fn leaf(n: u8) -> Hash {
-        let mut h = [0u8; 32];
-        h[0] = n;
-        h
-    }
+    use crate::test_util::*;
 
     #[test]
     fn ceil_log_n_empty() {
@@ -1105,11 +1087,11 @@ mod tests {
     #[test]
     fn chunked_level_push_and_get() {
         let mut level = ChunkedLevel::new();
-        for i in 0u8..10 {
+        for i in 0u32..10 {
             level.push(leaf(i)).unwrap();
         }
         assert_eq!(level.len, 10);
-        for i in 0u8..10 {
+        for i in 0u32..10 {
             assert_eq!(level.get(i as usize).unwrap(), leaf(i));
         }
     }
@@ -1118,7 +1100,7 @@ mod tests {
     fn chunked_level_promotes_at_chunk_size() {
         let mut level = ChunkedLevel::new();
         for i in 0..CHUNK_SIZE {
-            level.push(leaf(i as u8)).unwrap();
+            level.push(leaf(i as u32)).unwrap();
         }
         assert_eq!(level.chunk_count(), 1);
         assert_eq!(level.tail_len, 0);
@@ -1135,7 +1117,7 @@ mod tests {
     fn chunked_level_clone_shares_arcs() {
         let mut level = ChunkedLevel::new();
         for i in 0..CHUNK_SIZE + 5 {
-            level.push(leaf(i as u8)).unwrap();
+            level.push(leaf(i as u32)).unwrap();
         }
         let snap = level.clone();
         assert_eq!(snap.len(), level.len);
@@ -1464,30 +1446,12 @@ mod concurrent_tests {
     };
 
     use super::*;
-
-    #[derive(Clone)]
-    struct XorHasher;
-
-    impl crate::Hasher for XorHasher {
-        fn hash_bytes(&self, data: &[u8]) -> Hash {
-            let mut result = [0u8; 32];
-            for (i, &b) in data.iter().enumerate() {
-                result[i % 32] ^= b;
-            }
-            result
-        }
-    }
-
-    fn leaf(n: u8) -> Hash {
-        let mut h = [0u8; 32];
-        h[0] = n;
-        h
-    }
+    use crate::test_util::*;
 
     #[test]
     fn concurrent_insert_single_thread() {
         let tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
-        for i in 1..=10u8 {
+        for i in 1..=10u32 {
             tree.insert(leaf(i)).unwrap();
         }
         assert_eq!(tree.size(), 10);
@@ -1580,7 +1544,7 @@ mod concurrent_tests {
     #[test]
     fn snapshot_isolation() {
         let tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
-        for i in 1..=5u8 {
+        for i in 1..=5u32 {
             tree.insert(leaf(i)).unwrap();
         }
 
@@ -1590,7 +1554,7 @@ mod concurrent_tests {
         let snap_depth = snap.depth();
 
         // Insert more after taking the snapshot.
-        for i in 6..=10u8 {
+        for i in 6..=10u32 {
             tree.insert(leaf(i)).unwrap();
         }
 
@@ -1648,19 +1612,7 @@ mod parallel_tests {
     use std::vec::Vec;
 
     use super::*;
-
-    #[derive(Clone)]
-    struct XorHasher;
-
-    impl crate::Hasher for XorHasher {
-        fn hash_bytes(&self, data: &[u8]) -> Hash {
-            let mut result = [0u8; 32];
-            for (i, &b) in data.iter().enumerate() {
-                result[i % 32] ^= b;
-            }
-            result
-        }
-    }
+    use crate::test_util::XorHasher;
 
     fn make_leaves(count: usize) -> Vec<Hash> {
         (0..count)

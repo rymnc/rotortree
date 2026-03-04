@@ -2,30 +2,11 @@
 
 use rotortree::{
     Hash,
-    Hasher,
     LeanIMT,
     TreeError,
     TreeHasher,
+    test_util::*,
 };
-
-#[derive(Clone)]
-struct XorHasher;
-
-impl Hasher for XorHasher {
-    fn hash_bytes(&self, data: &[u8]) -> Hash {
-        let mut result = [0u8; 32];
-        for (i, &b) in data.iter().enumerate() {
-            result[i % 32] ^= b;
-        }
-        result
-    }
-}
-
-fn leaf(n: u32) -> Hash {
-    let mut h = [0u8; 32];
-    h[0..4].copy_from_slice(&n.to_le_bytes());
-    h
-}
 
 /// 130 leaves, N=3: group (126,127,128) spans chunk boundary → get_group slow path.
 #[test]

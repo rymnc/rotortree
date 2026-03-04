@@ -421,24 +421,7 @@ mod tests {
         }
     }
 
-    #[derive(Clone)]
-    struct XorHasher;
-
-    impl crate::Hasher for XorHasher {
-        fn hash_bytes(&self, data: &[u8]) -> Hash {
-            let mut result = [0u8; 32];
-            for (i, &b) in data.iter().enumerate() {
-                result[i % 32] ^= b;
-            }
-            result
-        }
-    }
-
-    fn leaf(n: u8) -> Hash {
-        let mut h = [0u8; 32];
-        h[0] = n;
-        h
-    }
+    use crate::test_util::*;
 
     #[test]
     fn recover_empty_wal() {
@@ -458,7 +441,7 @@ mod tests {
     fn recover_single_entries() {
         let mut buf = wal::serialize_header(2, 32);
         for i in 0..5u64 {
-            wal::serialize_entry(&mut buf, i, wal::WalPayload::Single(leaf(i as u8)));
+            wal::serialize_entry(&mut buf, i, wal::WalPayload::Single(leaf(i as u32)));
         }
 
         let mut file = MemFile::from_bytes(buf);
@@ -472,7 +455,7 @@ mod tests {
 
     #[test]
     fn recover_batch_entry() {
-        let leaves: Vec<Hash> = (0..10).map(leaf).collect();
+        let leaves: Vec<Hash> = (0..10u32).map(leaf).collect();
         let mut buf = wal::serialize_header(2, 32);
         wal::serialize_entry(
             &mut buf,
@@ -517,7 +500,7 @@ mod tests {
     fn recover_matches_sequential_inserts() {
         let mut buf = wal::serialize_header(2, 32);
         for i in 0..20u64 {
-            wal::serialize_entry(&mut buf, i, wal::WalPayload::Single(leaf(i as u8)));
+            wal::serialize_entry(&mut buf, i, wal::WalPayload::Single(leaf(i as u32)));
         }
 
         let mut file = MemFile::from_bytes(buf);
@@ -526,7 +509,7 @@ mod tests {
                 .unwrap();
 
         let mut inner = TreeInner::<2, 32>::new();
-        for i in 0..20u8 {
+        for i in 0..20u32 {
             crate::LeanIMT::<XorHasher, 2, 32>::_insert(
                 &mut inner,
                 &TreeHasher::new(XorHasher),
@@ -558,9 +541,9 @@ mod tests {
         let mut buf = wal::serialize_header(2, 32);
 
         for i in 0..3u64 {
-            wal::serialize_entry(&mut buf, i, wal::WalPayload::Single(leaf(i as u8)));
+            wal::serialize_entry(&mut buf, i, wal::WalPayload::Single(leaf(i as u32)));
         }
-        let batch: Vec<Hash> = (3..8).map(leaf).collect();
+        let batch: Vec<Hash> = (3..8u32).map(leaf).collect();
         wal::serialize_entry(
             &mut buf,
             3,
@@ -570,7 +553,7 @@ mod tests {
             wal::serialize_entry(
                 &mut buf,
                 i,
-                wal::WalPayload::Single(leaf((i + 4) as u8)),
+                wal::WalPayload::Single(leaf((i + 4) as u32)),
             );
         }
 
@@ -583,7 +566,7 @@ mod tests {
 
         // Verify against reference
         let mut inner = TreeInner::<2, 32>::new();
-        let all_leaves: Vec<Hash> = (0..10).map(leaf).collect();
+        let all_leaves: Vec<Hash> = (0..10u32).map(leaf).collect();
         crate::LeanIMT::<XorHasher, 2, 32>::_insert_many(
             &mut inner,
             &TreeHasher::new(XorHasher),

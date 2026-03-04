@@ -7,34 +7,15 @@ use rotortree::{
     CheckpointPolicy,
     FlushPolicy,
     Hash,
-    Hasher,
     RotorTree,
     RotorTreeConfig,
     RotorTreeError,
     StorageError,
     TieringConfig,
     TreeHasher,
+    test_util::*,
     write_test_meta,
 };
-
-#[derive(Clone)]
-struct XorHasher;
-
-impl Hasher for XorHasher {
-    fn hash_bytes(&self, data: &[u8]) -> Hash {
-        let mut result = [0u8; 32];
-        for (i, &b) in data.iter().enumerate() {
-            result[i % 32] ^= b;
-        }
-        result
-    }
-}
-
-fn leaf(n: u32) -> Hash {
-    let mut h = [0u8; 32];
-    h[0..4].copy_from_slice(&n.to_le_bytes());
-    h
-}
 
 fn manual_config(dir: &std::path::Path) -> RotorTreeConfig {
     RotorTreeConfig {

@@ -16,6 +16,7 @@ std = ["blake3?/std", "wincode?/std", "crc-fast?/std"]
 concurrent = ["std", "dep:parking_lot"]
 parallel = ["std", "dep:rayon"]
 storage = ["std", "dep:parking_lot", "dep:arc-swap", "wincode", "dep:crc-fast", "dep:fs4", "dep:memmap2"]
+test-helpers = []
 docs = ["dep:include-utils"]
 
 [dependencies]
@@ -35,6 +36,7 @@ divan = "0.1"
 crabtime = "1.1.4"
 tempfile = "3"
 tikv-jemallocator = "0.6"
+rotortree = { path = ".", features = ["test-helpers"] }
 
 [[bench]]
 name = "tree_bench"
