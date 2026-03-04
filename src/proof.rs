@@ -43,7 +43,7 @@ impl<const N: usize> ProofLevel<N> {
 }
 
 /// An N-ary Merkle inclusion proof
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NaryProof<const N: usize, const MAX_DEPTH: usize> {
@@ -158,7 +158,7 @@ impl<const N: usize> ConsistencyLevel<N> {
 ///
 /// Proves that a tree of `old_size` leaves is a prefix of a tree of
 /// `new_size` leaves
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConsistencyProof<const N: usize, const MAX_DEPTH: usize> {
