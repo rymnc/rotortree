@@ -30,7 +30,7 @@ the tree design itself is heavily inspired by [lean-imt](https://zkkit.org/leani
 - generic hasher, blake3 default
 - batteries included for playing with different branching factors and max depths
 - wal for persistence and recovery, with checkpointing to prevent unbounded wal growth
-- [wincode](https://github.com/anza-xyz/wincode) for fast serde
+- [wincode](https://github.com/anza-xyz/wincode) & regular serde for compatibility with ecosystem (e.g the jolt prover needs serde)
 - no_std by default, persistence requires std
 - benchmarks driven and configured by divan + crabtime
 - by default your tree lives in memory, but with the `storage` feature you can tier cold levels to mmap'd data files via `TieringConfig::pin_above_level`

@@ -20,12 +20,17 @@ fn to_u8(v: usize) -> Result<u8, TreeError> {
 /// are valid, indicated by `sibling_count`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ProofLevel<const N: usize> {
     /// Child position within the group (`0..N-1`)
     pub position: u8,
     /// Number of valid siblings in `siblings` (0 for lifted)
     pub sibling_count: u8,
     /// Sibling hashes
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "serde_with::As::<[serde_with::Same; N]>")
+    )]
     pub siblings: [Hash; N],
 }
 
@@ -40,6 +45,7 @@ impl<const N: usize> ProofLevel<N> {
 /// An N-ary Merkle inclusion proof
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct NaryProof<const N: usize, const MAX_DEPTH: usize> {
     /// The Merkle root this proof verifies against
     pub root: Hash,
@@ -52,6 +58,10 @@ pub struct NaryProof<const N: usize, const MAX_DEPTH: usize> {
     /// Number of valid levels in `levels`
     pub level_count: usize,
     /// Proof levels from leaf to root
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "serde_with::As::<[serde_with::Same; MAX_DEPTH]>")
+    )]
     pub levels: [ProofLevel<N>; MAX_DEPTH],
 }
 
@@ -116,12 +126,17 @@ impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
 /// Per-level data in a consistency proof
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConsistencyLevel<const N: usize> {
     /// Number of shared (left) siblings in `hashes`
     pub shared_count: u8,
     /// Number of new-only (right) siblings in `hashes`.
     pub new_count: u8,
     /// `[shared..., new...]` hashes
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "serde_with::As::<[serde_with::Same; N]>")
+    )]
     pub hashes: [Hash; N],
 }
 
@@ -145,6 +160,7 @@ impl<const N: usize> ConsistencyLevel<N> {
 /// `new_size` leaves
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "wincode", derive(wincode::SchemaWrite, wincode::SchemaRead))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ConsistencyProof<const N: usize, const MAX_DEPTH: usize> {
     /// Root of the old (smaller) tree
     pub old_root: Hash,
@@ -157,6 +173,10 @@ pub struct ConsistencyProof<const N: usize, const MAX_DEPTH: usize> {
     /// Number of valid levels in `levels`
     pub level_count: usize,
     /// Proof levels from leaves toward root
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "serde_with::As::<[serde_with::Same; MAX_DEPTH]>")
+    )]
     pub levels: [ConsistencyLevel<N>; MAX_DEPTH],
 }
 
