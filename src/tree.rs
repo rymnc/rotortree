@@ -295,46 +295,74 @@ impl ChunkedLevel {
         Ok(())
     }
 
-    fn extend(&mut self, values: &[Hash]) -> Result<(), TreeError> {
-        if values.is_empty() {
+    fn extend_hashed<H: crate::Hasher>(
+        &mut self,
+        leaves: &[Hash],
+        hasher: &crate::TreeHasher<H>,
+    ) -> Result<(), TreeError> {
+        if leaves.is_empty() {
             return Ok(());
         }
         let new_len = self
             .len
-            .checked_add(values.len())
+            .checked_add(leaves.len())
             .ok_or(TreeError::MathError)?;
-        let mut remaining = values;
 
-        // fill current tail
+        let mut remaining = leaves;
+
         if self.tail_len > 0 {
             let space = CHUNK_SIZE - self.tail_len;
-            let to_copy = space.min(remaining.len());
-            self.tail[self.tail_len..self.tail_len + to_copy]
-                .copy_from_slice(&remaining[..to_copy]);
-            self.tail_len += to_copy;
-            remaining = &remaining[to_copy..];
+            let n = space.min(remaining.len());
+            for (dst, src) in self.tail[self.tail_len..].iter_mut().zip(&remaining[..n]) {
+                *dst = hasher.hash_leaf(src);
+            }
+            self.tail_len += n;
+            remaining = &remaining[n..];
             if self.tail_len == CHUNK_SIZE {
                 self.promote_tail();
             }
         }
 
-        // dont use tail for full chunks
-        let full_chunks = remaining.len() / CHUNK_SIZE;
-        if full_chunks > 0 {
-            for i in 0..full_chunks {
-                let start = i * CHUNK_SIZE;
-                let chunk: [Hash; CHUNK_SIZE] = remaining[start..start + CHUNK_SIZE]
-                    .try_into()
-                    .expect("slice len == CHUNK_SIZE; qed");
-                self.push_chunk(Chunk::new_memory(chunk));
+        let chunk_leaves = remaining.chunks_exact(CHUNK_SIZE);
+        let leftover = chunk_leaves.remainder();
+
+        let hash_chunk = |cl: &[Hash]| -> Chunk {
+            let mut data = [[0u8; 32]; CHUNK_SIZE];
+            for (d, s) in data.iter_mut().zip(cl) {
+                *d = hasher.hash_leaf(s);
             }
-            remaining = &remaining[full_chunks * CHUNK_SIZE..];
+            Chunk::new_memory(data)
+        };
+
+        #[cfg(feature = "parallel")]
+        let chunks: Vec<Chunk> = {
+            if remaining.len() >= parallel_threshold() {
+                use rayon::prelude::*;
+                chunk_leaves
+                    .collect::<Vec<_>>()
+                    .into_par_iter()
+                    .map(|cl| hash_chunk(cl))
+                    .collect()
+            } else {
+                chunk_leaves.map(hash_chunk).collect()
+            }
+        };
+
+        #[cfg(not(feature = "parallel"))]
+        let chunks: Vec<Chunk> = chunk_leaves.map(hash_chunk).collect();
+
+        if !chunks.is_empty() {
+            self.pending.reserve(chunks.len().min(CHUNKS_PER_SEGMENT));
+            for chunk in chunks {
+                self.push_chunk(chunk);
+            }
         }
 
-        // tail remainder
-        if !remaining.is_empty() {
-            self.tail[..remaining.len()].copy_from_slice(remaining);
-            self.tail_len = remaining.len();
+        if !leftover.is_empty() {
+            for (dst, src) in self.tail.iter_mut().zip(leftover) {
+                *dst = hasher.hash_leaf(src);
+            }
+            self.tail_len = leftover.len();
         }
 
         self.len = new_len;
@@ -921,9 +949,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
             });
         }
 
-        let hashed_leaves: Vec<Hash> =
-            leaves.iter().map(|l| hasher.hash_leaf(l)).collect();
-        inner.levels[0].extend(&hashed_leaves)?;
+        inner.levels[0].extend_hashed(leaves, hasher)?;
 
         // allocate upfront
         {
@@ -968,7 +994,10 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
                     let child_level = &child_levels[level];
 
                     par_buf.clear();
-                    par_buf.resize(work, [0u8; 32]);
+                    par_buf.reserve(work);
+                    // SAFETY: every slot is overwritten by the parallel
+                    // loop below before being read in the writeback loop.
+                    unsafe { par_buf.set_len(work) };
 
                     par_buf.par_chunks_mut(PAR_CHUNK_SIZE).enumerate().for_each(
                         |(ci, chunk)| {

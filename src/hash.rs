@@ -38,9 +38,10 @@ impl<H: Hasher> TreeHasher<H> {
 
     #[inline(always)]
     pub fn hash_leaf(&self, leaf: &Hash) -> Hash {
+        let mut buf = [0u8; 33];
+        buf[1..].copy_from_slice(leaf);
         let mut state = self.0.new_state();
-        state.update(&[0x00]);
-        state.update(leaf);
+        state.update(&buf);
         state.finalize()
     }
 
