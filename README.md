@@ -140,6 +140,31 @@ tree.close().unwrap();
 `TieringConfig` controls which levels stay in memory vs get mmap'd after checkpoint:
 - `pin_above_level`: levels below this value have their committed chunks mmap'd from data files after checkpoint. set to `usize::MAX` to mmap everything (default), `0` to keep everything in memory
 
+### Provability
+
+#### Jolt
+
+```math
+\text{execution\_cycles} \approx 2948.4 + 1832.9 \cdot N \cdot D + (899.5 + 2993.8N - 103.4N^2) \cdot d
+```
+
+```math
+\text{where } N \in \{2, 4, 8, 16\}, \quad D = \text{max\_depth}, \quad d = \lceil \log_N(\text{num\_leaves}) \rceil
+```
+
+#### Noir (UltraHonk via bb)
+
+```math
+\text{expression\_width} = 68 + (217N - 100) \cdot d
+```
+```math
+\text{circuit\_size} = 2962 + 30N + (551N^2 + 2629N - 2448) \cdot d
+```
+
+```math
+\text{where } N \in \{2, 4, 8, 16\}, \quad d = \lceil \log_N(\text{num\_leaves}) \rceil
+```
+
 ### Tuning
 
 of course, you'll have to benchmark your unique workload to see if this database suits your use case and requirements. here are some constants and env vars you can play around with to alter behaviour:
