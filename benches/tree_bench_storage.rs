@@ -1,8 +1,17 @@
 use criterion::{
-    BatchSize, BenchmarkId, Throughput, criterion_group, criterion_main,
+    BatchSize,
+    BenchmarkId,
+    Throughput,
+    criterion_group,
+    criterion_main,
 };
 use rotortree::{
-    Blake3Hasher, CheckpointPolicy, FlushPolicy, RotorTree, RotorTreeConfig, TreeHasher,
+    Blake3Hasher,
+    CheckpointPolicy,
+    FlushPolicy,
+    RotorTree,
+    RotorTreeConfig,
+    TreeHasher,
 };
 
 mod common;

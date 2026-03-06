@@ -1,7 +1,15 @@
 use criterion::{
-    BatchSize, BenchmarkId, Throughput, criterion_group, criterion_main,
+    BatchSize,
+    BenchmarkId,
+    Throughput,
+    criterion_group,
+    criterion_main,
 };
-use rotortree::{Blake3Hasher, LeanIMT, TreeHasher};
+use rotortree::{
+    Blake3Hasher,
+    LeanIMT,
+    TreeHasher,
+};
 use std::sync::Arc;
 
 mod common;
