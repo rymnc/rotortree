@@ -16,7 +16,7 @@ extern crate alloc;
 #[cfg(test)]
 use {
     crabtime as _,
-    divan as _,
+    criterion as _,
     proptest as _,
     rotortree as _,
     tempfile as _,

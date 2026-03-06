@@ -1,136 +1,147 @@
+use criterion::{
+    BatchSize, BenchmarkId, Throughput, criterion_group, criterion_main,
+};
 use rotortree::{
-    Blake3Hasher,
-    CheckpointPolicy,
-    FlushPolicy,
-    RotorTree,
-    RotorTreeConfig,
-    TreeHasher,
+    Blake3Hasher, CheckpointPolicy, FlushPolicy, RotorTree, RotorTreeConfig, TreeHasher,
 };
 
 mod common;
 use common::generate_leaves;
 
-fn main() {
-    divan::main();
-}
-
 #[crabtime::function]
 fn bench_insert_single(n_values: Vec<usize>) {
-    let counts = [1_000usize, 10_000, 100_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn insert_single_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let leaves = generate_leaves({{count}});
-                    bencher
-                        .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| {
-                            let dir = tempfile::tempdir().unwrap();
-                            let config = RotorTreeConfig {
-                                path: dir.path().to_path_buf(),
-                                flush_policy: FlushPolicy::Manual,
-                                checkpoint_policy: Default::default(),
-                                tiering: Default::default(),
-                                verify_checkpoint: true,
-                            };
-                            let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
-                            (tree, dir)
-                        })
-                        .bench_local_refs(|(tree, _dir)| {
-                            for &leaf in &leaves {
-                                divan::black_box(tree.insert(leaf).unwrap());
-                            }
-                        });
+        crabtime::output! {
+            fn insert_single_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("insert_single/n", {{n}}));
+                for count in [1_000usize, 10_000, 100_000] {
+                    let leaves = generate_leaves(count);
+                    group.throughput(Throughput::Elements(count as u64));
+                    group.bench_with_input(
+                        BenchmarkId::from_parameter(count),
+                        &leaves,
+                        |b, leaves| {
+                            b.iter_batched_ref(
+                                || {
+                                    let dir = tempfile::tempdir().unwrap();
+                                    let config = RotorTreeConfig {
+                                        path: dir.path().to_path_buf(),
+                                        flush_policy: FlushPolicy::Manual,
+                                        checkpoint_policy: Default::default(),
+                                        tiering: Default::default(),
+                                        verify_checkpoint: true,
+                                    };
+                                    let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
+                                    (tree, dir)
+                                },
+                                |(tree, _dir)| {
+                                    for &leaf in leaves {
+                                        std::hint::black_box(tree.insert(leaf).unwrap());
+                                    }
+                                },
+                                BatchSize::PerIteration,
+                            );
+                        },
+                    );
                 }
+                group.finish();
             }
         }
     }
 }
-
-bench_insert_single!([2, 4, 8, 16]);
 
 #[crabtime::function]
 fn bench_insert_many(n_values: Vec<usize>) {
-    let counts = [1_000usize, 10_000, 100_000, 1_000_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn insert_many_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let leaves = generate_leaves({{count}});
-                    bencher
-                        .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| {
-                            let dir = tempfile::tempdir().unwrap();
-                            let config = RotorTreeConfig {
-                                path: dir.path().to_path_buf(),
-                                flush_policy: FlushPolicy::Manual,
-                                checkpoint_policy: Default::default(),
-                                tiering: Default::default(),
-                                verify_checkpoint: true,
-                             };
-                            let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
-                            #[cfg(feature = "parallel")]
-                            rayon::broadcast(|_| {});
-                            (tree, dir)
-                        })
-                        .bench_local_refs(|(tree, _dir)| {
-                            divan::black_box(tree.insert_many(&leaves).unwrap());
-                        });
+        crabtime::output! {
+            fn insert_many_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("insert_many/n", {{n}}));
+                for count in [1_000usize, 10_000, 100_000, 1_000_000] {
+                    let leaves = generate_leaves(count);
+                    group.throughput(Throughput::Elements(count as u64));
+                    group.bench_with_input(
+                        BenchmarkId::from_parameter(count),
+                        &leaves,
+                        |b, leaves| {
+                            b.iter_batched_ref(
+                                || {
+                                    let dir = tempfile::tempdir().unwrap();
+                                    let config = RotorTreeConfig {
+                                        path: dir.path().to_path_buf(),
+                                        flush_policy: FlushPolicy::Manual,
+                                        checkpoint_policy: Default::default(),
+                                        tiering: Default::default(),
+                                        verify_checkpoint: true,
+                                    };
+                                    let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
+                                    #[cfg(feature = "parallel")]
+                                    rayon::broadcast(|_| {});
+                                    (tree, dir)
+                                },
+                                |(tree, _dir)| {
+                                    std::hint::black_box(tree.insert_many(leaves).unwrap());
+                                },
+                                BatchSize::PerIteration,
+                            );
+                        },
+                    );
                 }
+                group.finish();
             }
         }
     }
 }
-
-bench_insert_many!([2, 4, 8, 16]);
 
 #[crabtime::function]
 fn bench_flush(n_values: Vec<usize>) {
-    let counts = [1_000usize, 10_000, 100_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn flush_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let leaves = generate_leaves({{count}});
-                    bencher
-                        .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| {
-                            let dir = tempfile::tempdir().unwrap();
-                            let config = RotorTreeConfig {
-                                path: dir.path().to_path_buf(),
-                                flush_policy: FlushPolicy::Manual,
-                                checkpoint_policy: Default::default(),
-                                tiering: Default::default(),
-                                verify_checkpoint: true,
-                             };
-                            let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
-                            tree.insert_many(&leaves).unwrap();
-                            (tree, dir)
-                        })
-                        .bench_local_values(|(tree, _dir)| {
-                            divan::black_box(tree.flush().unwrap());
-                            tree.close().unwrap();
-                        });
+        crabtime::output! {
+            fn flush_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("flush/n", {{n}}));
+                for count in [1_000usize, 10_000, 100_000] {
+                    let leaves = generate_leaves(count);
+                    group.throughput(Throughput::Elements(count as u64));
+                    group.bench_with_input(
+                        BenchmarkId::from_parameter(count),
+                        &leaves,
+                        |b, leaves| {
+                            b.iter_batched(
+                                || {
+                                    let dir = tempfile::tempdir().unwrap();
+                                    let config = RotorTreeConfig {
+                                        path: dir.path().to_path_buf(),
+                                        flush_policy: FlushPolicy::Manual,
+                                        checkpoint_policy: Default::default(),
+                                        tiering: Default::default(),
+                                        verify_checkpoint: true,
+                                    };
+                                    let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
+                                    tree.insert_many(leaves).unwrap();
+                                    (tree, dir)
+                                },
+                                |(tree, _dir)| {
+                                    std::hint::black_box(tree.flush().unwrap());
+                                    tree.close().unwrap();
+                                },
+                                BatchSize::PerIteration,
+                            );
+                        },
+                    );
                 }
+                group.finish();
             }
         }
     }
 }
 
-bench_flush!([2, 4, 8, 16]);
-
 #[crabtime::function]
 fn bench_open_recover(n_values: Vec<usize>) {
-    let counts = [1_000usize, 10_000, 100_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn open_recover_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let leaves = generate_leaves({{count}});
+        crabtime::output! {
+            fn open_recover_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("open_recover/n", {{n}}));
+                for count in [1_000usize, 10_000, 100_000] {
+                    let leaves = generate_leaves(count);
                     let dir = tempfile::tempdir().unwrap();
                     let path = dir.path().to_path_buf();
                     {
@@ -140,133 +151,170 @@ fn bench_open_recover(n_values: Vec<usize>) {
                             checkpoint_policy: Default::default(),
                             tiering: Default::default(),
                             verify_checkpoint: true,
-                     };
+                        };
                         let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
                         tree.insert_many(&leaves).unwrap();
                         tree.flush().unwrap();
                         tree.close().unwrap();
                     }
-                    bencher
-                        .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| path.clone())
-                        .bench_local_values(|path| {
-                            let config = RotorTreeConfig {
-                                path,
-                                flush_policy: FlushPolicy::Manual,
-                                checkpoint_policy: Default::default(),
-                                tiering: Default::default(),
-                                verify_checkpoint: true,
-                            };
-                            let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
-                            divan::black_box(tree.root());
-                            tree.close().unwrap();
-                        });
-                }
-            }
-        }
-    }
-}
-
-bench_open_recover!([2, 4, 8, 16]);
-
-#[crabtime::function]
-fn bench_mixed_workload(n_values: Vec<usize>) {
-    let tick_sizes = [100usize, 1_000, 10_000, 100_000];
-    for n in n_values {
-        for tick in tick_sizes {
-            crabtime::output! {
-                #[divan::bench]
-                fn mixed_workload_n{{n}}_{{tick}}(bencher: divan::Bencher) {
-                    let prepop_leaves = generate_leaves(10_000);
-                    let tick_leaves = generate_leaves({{tick}});
-                    let th = TreeHasher::new(Blake3Hasher);
-
-                    bencher
-                        .counter(divan::counter::ItemsCount::new({{tick}} as usize))
-                        .with_inputs(|| {
-                            let dir = tempfile::tempdir().unwrap();
-                            let config = RotorTreeConfig {
-                                path: dir.path().to_path_buf(),
-                                flush_policy: FlushPolicy::Manual,
-                                checkpoint_policy: Default::default(),
-                                tiering: Default::default(),
-                                verify_checkpoint: true,
-                             };
-                            let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
-                            tree.insert_many(&prepop_leaves).unwrap();
-                            tree.flush().unwrap();
-                            (tree, dir)
-                        })
-                        .bench_local_values(|(tree, _dir)| {
-                            let (root, _token) = tree.insert_many(&tick_leaves).unwrap();
-                            divan::black_box(root);
-
-                            divan::black_box(tree.root());
-
-                            let snap = tree.snapshot();
-                            let proof_index = snap.size() / 2;
-                            let proof = snap.generate_proof(proof_index).unwrap();
-                            divan::black_box(&proof);
-
-                            divan::black_box(proof.verify(&th).unwrap());
-                            tree.close().unwrap();
-                        });
-                }
-            }
-        }
-    }
-}
-
-bench_mixed_workload!([2, 4, 8, 16]);
-
-#[crabtime::function]
-fn bench_sustained_checkpoint(n_values: Vec<usize>) {
-    let counts = [100_000, 1_000_000];
-    let ckpt_freqs = [5usize, 25, 100, 500];
-    for n in n_values {
-        for count in counts {
-            for freq in ckpt_freqs {
-                crabtime::output! {
-                    #[divan::bench]
-                    fn sustained_checkpoint_n{{n}}_{{count}}_every{{freq}}(bencher: divan::Bencher) {
-                        let leaves = generate_leaves({{count}});
-                        let th = TreeHasher::new(Blake3Hasher);
-                        bencher
-                            .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                            .with_inputs(|| {
-                                let dir = tempfile::tempdir().unwrap();
+                    group.throughput(Throughput::Elements(count as u64));
+                    group.bench_function(BenchmarkId::from_parameter(count), |b| {
+                        b.iter_batched(
+                            || path.clone(),
+                            |path| {
                                 let config = RotorTreeConfig {
-                                    path: dir.path().to_path_buf(),
+                                    path,
                                     flush_policy: FlushPolicy::Manual,
-                                    checkpoint_policy: CheckpointPolicy::EveryNEntries({{freq}} as u64),
+                                    checkpoint_policy: Default::default(),
                                     tiering: Default::default(),
                                     verify_checkpoint: true,
                                 };
                                 let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
-                                (tree, dir)
-                            })
-                            .bench_local_refs(|(tree, _dir)| {
-                                for chunk in leaves.chunks(10_000) {
-                                    divan::black_box(tree.insert_many(chunk).unwrap());
-
-                                    let snap = tree.snapshot();
-                                    let size = snap.size();
-                                    // proof at oldest leaf
-                                    let proof = snap.generate_proof(0).unwrap();
-                                    divan::black_box(proof.verify(&th).unwrap());
-                                    // proof at midpoint
-                                    let proof = snap.generate_proof(size / 2).unwrap();
-                                    divan::black_box(proof.verify(&th).unwrap());
-                                    // proof at newest leaf
-                                    let proof = snap.generate_proof(size - 1).unwrap();
-                                    divan::black_box(proof.verify(&th).unwrap());
-                                }
-                            });
-                    }
+                                std::hint::black_box(tree.root());
+                                tree.close().unwrap();
+                            },
+                            BatchSize::PerIteration,
+                        );
+                    });
                 }
+                group.finish();
             }
         }
     }
 }
 
-bench_sustained_checkpoint!([2, 4, 8, 16]);
+#[crabtime::function]
+fn bench_mixed_workload(n_values: Vec<usize>) {
+    for n in n_values {
+        crabtime::output! {
+            fn mixed_workload_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("mixed_workload/n", {{n}}));
+                for tick in [100usize, 1_000, 10_000, 100_000] {
+                    let prepop_leaves = generate_leaves(10_000);
+                    let tick_leaves = generate_leaves(tick);
+                    let th = TreeHasher::new(Blake3Hasher);
+                    group.throughput(Throughput::Elements(tick as u64));
+                    group.bench_with_input(
+                        BenchmarkId::from_parameter(tick),
+                        &(prepop_leaves.clone(), tick_leaves.clone()),
+                        |b, (prepop_leaves, tick_leaves)| {
+                            b.iter_batched(
+                                || {
+                                    let dir = tempfile::tempdir().unwrap();
+                                    let config = RotorTreeConfig {
+                                        path: dir.path().to_path_buf(),
+                                        flush_policy: FlushPolicy::Manual,
+                                        checkpoint_policy: Default::default(),
+                                        tiering: Default::default(),
+                                        verify_checkpoint: true,
+                                    };
+                                    let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
+                                    tree.insert_many(prepop_leaves).unwrap();
+                                    tree.flush().unwrap();
+                                    (tree, dir)
+                                },
+                                |(tree, _dir)| {
+                                    let (root, _token) = tree.insert_many(tick_leaves).unwrap();
+                                    std::hint::black_box(root);
+
+                                    std::hint::black_box(tree.root());
+
+                                    let snap = tree.snapshot();
+                                    let proof_index = snap.size() / 2;
+                                    let proof = snap.generate_proof(proof_index).unwrap();
+                                    std::hint::black_box(&proof);
+
+                                    std::hint::black_box(proof.verify(&th).unwrap());
+                                    tree.close().unwrap();
+                                },
+                                BatchSize::PerIteration,
+                            );
+                        },
+                    );
+                }
+                group.finish();
+            }
+        }
+    }
+}
+
+#[crabtime::function]
+fn bench_sustained_checkpoint(n_values: Vec<usize>) {
+    for n in n_values {
+        crabtime::output! {
+            fn sustained_checkpoint_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("sustained_checkpoint/n", {{n}}));
+                for count in [100_000usize, 1_000_000] {
+                    for freq in [5usize, 25, 100, 500] {
+                        let leaves = generate_leaves(count);
+                        let th = TreeHasher::new(Blake3Hasher);
+                        group.throughput(Throughput::Elements(count as u64));
+                        group.bench_with_input(
+                            BenchmarkId::new(format!("every{freq}"), count),
+                            &leaves,
+                            |b, leaves| {
+                                b.iter_batched_ref(
+                                    || {
+                                        let dir = tempfile::tempdir().unwrap();
+                                        let config = RotorTreeConfig {
+                                            path: dir.path().to_path_buf(),
+                                            flush_policy: FlushPolicy::Manual,
+                                            checkpoint_policy: CheckpointPolicy::EveryNEntries(freq as u64),
+                                            tiering: Default::default(),
+                                            verify_checkpoint: true,
+                                        };
+                                        let tree = RotorTree::<Blake3Hasher, {{n}}, 32>::open(Blake3Hasher, config).unwrap();
+                                        (tree, dir)
+                                    },
+                                    |(tree, _dir)| {
+                                        for chunk in leaves.chunks(10_000) {
+                                            std::hint::black_box(tree.insert_many(chunk).unwrap());
+
+                                            let snap = tree.snapshot();
+                                            let size = snap.size();
+                                            let proof = snap.generate_proof(0).unwrap();
+                                            std::hint::black_box(proof.verify(&th).unwrap());
+                                            let proof = snap.generate_proof(size / 2).unwrap();
+                                            std::hint::black_box(proof.verify(&th).unwrap());
+                                            let proof = snap.generate_proof(size - 1).unwrap();
+                                            std::hint::black_box(proof.verify(&th).unwrap());
+                                        }
+                                    },
+                                    BatchSize::PerIteration,
+                                );
+                            },
+                        );
+                    }
+                }
+                group.finish();
+            }
+        }
+    }
+}
+
+#[crabtime::function]
+fn define_harness(n_values: Vec<usize>) {
+    for n in n_values {
+        crabtime::output! {
+            bench_insert_single!([{{n}}]);
+            bench_insert_many!([{{n}}]);
+            bench_flush!([{{n}}]);
+            bench_open_recover!([{{n}}]);
+            bench_mixed_workload!([{{n}}]);
+            bench_sustained_checkpoint!([{{n}}]);
+
+            criterion_group!(
+                benches_n{{n}},
+                insert_single_n{{n}},
+                insert_many_n{{n}},
+                flush_n{{n}},
+                open_recover_n{{n}},
+                mixed_workload_n{{n}},
+                sustained_checkpoint_n{{n}}
+            );
+        }
+    }
+}
+
+define_harness!([2, 4, 8, 16]);
+criterion_main!(benches_n2, benches_n4, benches_n8, benches_n16);

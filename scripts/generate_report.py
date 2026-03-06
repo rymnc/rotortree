@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Parse divan benchmark output and generate an HTML report."""
+"""Parse criterion JSON benchmark output and generate an HTML report."""
 
 import argparse
 import html
+import json
 import re
 import sys
 from dataclasses import dataclass, field
@@ -14,18 +15,13 @@ from pathlib import Path
 @dataclass
 class BenchEntry:
     name: str
-    raw_name: str
-    parent: str | None
-    fastest: str
-    slowest: str
-    median: str
-    mean: str
+    fastest_ns: float
+    slowest_ns: float
+    median_ns: float
+    mean_ns: float
     samples: int
     iters: int
-    tp_fastest: str = ""
-    tp_slowest: str = ""
-    tp_median: str = ""
-    tp_mean: str = ""
+    throughput_elements: int | None = None
 
 
 @dataclass
@@ -105,72 +101,162 @@ DISPLAY_NAMES = {
     "sustained_checkpoint": "sustained checkpoint",
 }
 
-# Regex to strip ANSI escape codes
-RE_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
-# Regex for the header line (binary name + column headers)
-RE_HEADER = re.compile(r"^(\S+)\s+fastest\s+\u2502")
-
-# Regex for a timing line: branch char + name + timing columns
-# Divan uses │ (U+2502) as column separator
-RE_TIMING = re.compile(
-    r"^([\u2502\s]*)"  # leading indent
-    r"[\u251c\u2570]\u2500\s+"  # branch char (├─ or ╰─)
-    r"(\S+)\s+"  # benchmark name or arg value
-    r"([\d.,]+\s+\S+)\s+\u2502\s+"  # fastest
-    r"([\d.,]+\s+\S+)\s+\u2502\s+"  # slowest
-    r"([\d.,]+\s+\S+)\s+\u2502\s+"  # median
-    r"([\d.,]+\s+\S+)\s+\u2502\s+"  # mean
-    r"(\d+)\s+\u2502\s+"  # samples
-    r"(\d+)"  # iters
-)
-
-# Regex for a throughput line (continuation with item/s data)
-RE_THROUGHPUT = re.compile(
-    r"^[\u2502\s]+"  # leading indent/continuation
-    r"([\d.,]+\s+\S*item/s)\s+\u2502\s+"  # fastest throughput
-    r"([\d.,]+\s+\S*item/s)\s+\u2502\s+"  # slowest throughput
-    r"([\d.,]+\s+\S*item/s)\s+\u2502\s+"  # median throughput
-    r"([\d.,]+\s+\S*item/s)"  # mean throughput
-)
-
-# Regex for a parent-only line (e.g., special_insert_many with no timing)
-RE_PARENT = re.compile(
-    r"^([\u2502\s]*)"
-    r"[\u251c\u2570]\u2500\s+"
-    r"(\S+)\s*$"
-)
-
-# Regex to decompose crabtime-generated benchmark names
-RE_BENCH_NAME = re.compile(r"^(.+?)_n(\d+)_(\d+)(?:_every(\d+))?$")
+# ── Time formatting ───────────────────────────────────────────────────────
 
 
-# ── Time parsing ───────────────────────────────────────────────────────────
+def format_time_ns(ns: float) -> str:
+    """Format nanoseconds to human-readable string."""
+    if ns < 1e3:
+        return f"{ns:.1f} ns"
+    elif ns < 1e6:
+        return f"{ns / 1e3:.1f} µs"
+    elif ns < 1e9:
+        return f"{ns / 1e6:.3f} ms"
+    else:
+        return f"{ns / 1e9:.3f} s"
 
-TIME_UNITS = {"ns": 1.0, "µs": 1e3, "us": 1e3, "ms": 1e6, "s": 1e9}
-RE_TIME = re.compile(r"^([\d.,]+)\s+(\S+)$")
+
+def format_throughput(elements: int, time_ns: float) -> str:
+    """Format throughput as elements/second."""
+    if time_ns <= 0:
+        return ""
+    eps = elements / (time_ns / 1e9)
+    if eps >= 1e6:
+        return f"{eps / 1e6:.2f} Melem/s"
+    elif eps >= 1e3:
+        return f"{eps / 1e3:.2f} Kelem/s"
+    else:
+        return f"{eps:.0f} elem/s"
 
 
-def parse_time_to_ns(s: str) -> float | None:
-    """Parse a timing string like '109.1 ns' or '2.735 ms' into nanoseconds."""
-    m = RE_TIME.match(s.strip())
+# ── Criterion JSON parsing ────────────────────────────────────────────────
+
+
+def parse_criterion_dir(binary_dir: Path) -> dict:
+    """Walk a binary's criterion output directory and extract benchmark entries.
+
+    Structure: binary_dir/{group_dir}/{param_dir}/new/{estimates,benchmark,sample}.json
+    For sustained_checkpoint: binary_dir/{group_dir}/{function_dir}/{param_dir}/new/...
+    """
+    binary_name = binary_dir.name
+    entries: list[BenchEntry] = []
+
+    # Find all benchmark.json files — they mark individual benchmark points
+    # Prefer new/ over base/ (both may exist when criterion has a previous baseline)
+    for bm_json in sorted(binary_dir.rglob("benchmark.json")):
+        data_dir = bm_json.parent  # e.g., .../new/ or .../base/
+        param_dir = data_dir.parent  # e.g., .../insert_many_n8/1000/
+
+        # Skip base/ if new/ exists for the same benchmark
+        if data_dir.name == "base" and (param_dir / "new" / "benchmark.json").exists():
+            continue
+        # Skip change/ directory (contains diff estimates, not raw data)
+        if data_dir.name == "change":
+            continue
+
+        try:
+            benchmark = json.loads(bm_json.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        group_id = benchmark.get("group_id", "")
+        value_str = benchmark.get("value_str", "")
+        function_id = benchmark.get("function_id")
+        throughput = benchmark.get("throughput")
+
+        # Read estimates.json for mean/median
+        estimates_path = data_dir / "estimates.json"
+        if not estimates_path.exists():
+            continue
+        try:
+            estimates = json.loads(estimates_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        mean_ns = estimates["mean"]["point_estimate"]
+        median_ns = estimates["median"]["point_estimate"]
+
+        # Read sample.json for fastest/slowest
+        sample_path = data_dir / "sample.json"
+        if not sample_path.exists():
+            continue
+        try:
+            sample = json.loads(sample_path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        iters_list = sample["iters"]
+        times_list = sample["times"]
+        per_iter = [t / i for t, i in zip(times_list, iters_list) if i > 0]
+        if not per_iter:
+            continue
+
+        fastest_ns = min(per_iter)
+        slowest_ns = max(per_iter)
+        samples = len(iters_list)
+        total_iters = int(sum(iters_list))
+
+        throughput_elements = None
+        if throughput and "Elements" in throughput:
+            throughput_elements = int(throughput["Elements"])
+
+        # Build entry name to match divan convention: {op}_n{N}_{count}[_every{freq}]
+        # group_id is like "insert_many/n8", value_str is like "1000"
+        # function_id is like "every5" for sustained_checkpoint
+        op_n = group_id.replace("/", "_")  # "insert_many_n8"
+        if function_id:
+            entry_name = f"{op_n}_{function_id}_{value_str}"
+        else:
+            entry_name = f"{op_n}_{value_str}"
+
+        entries.append(
+            BenchEntry(
+                name=entry_name,
+                fastest_ns=fastest_ns,
+                slowest_ns=slowest_ns,
+                median_ns=median_ns,
+                mean_ns=mean_ns,
+                samples=samples,
+                iters=total_iters,
+                throughput_elements=throughput_elements,
+            )
+        )
+
+    return {"binary": binary_name, "entries": entries}
+
+
+# ── Name decomposition ────────────────────────────────────────────────────
+
+RE_BENCH_NAME = re.compile(r"^(.+?)_n(\d+)(?:_every(\d+))?_(\d+)$")
+
+
+def decompose_name(entry: BenchEntry) -> BenchId:
+    """Decompose a benchmark name into structured components."""
+    m = RE_BENCH_NAME.match(entry.name)
     if not m:
-        return None
-    value_str, unit = m.groups()
-    multiplier = TIME_UNITS.get(unit)
-    if multiplier is None:
-        return None
-    return float(value_str.replace(",", "")) * multiplier
+        return BenchId(operation=entry.name, n=0, count=0)
+
+    op, n, every, count = m.groups()
+    extra = {}
+    if every:
+        extra["every"] = int(every)
+    return BenchId(operation=op, n=int(n), count=int(count), extra=extra)
 
 
-def compute_diff_pct(current: str, previous: float | None) -> float | None:
+def format_count(n: int) -> str:
+    """Format a count with thousand separators."""
+    return f"{n:,}"
+
+
+# ── Diff computation ─────────────────────────────────────────────────────
+
+
+def compute_diff_pct(current_ns: float, previous_ns: float | None) -> float | None:
     """Compute % change from previous to current. Positive = regression (slower)."""
-    if previous is None:
+    if previous_ns is None or previous_ns == 0:
         return None
-    cur_ns = parse_time_to_ns(current)
-    if cur_ns is None or previous == 0:
-        return None
-    return ((cur_ns - previous) / previous) * 100.0
+    return ((current_ns - previous_ns) / previous_ns) * 100.0
 
 
 def find_previous_run(input_dir: Path) -> Path | None:
@@ -190,8 +276,15 @@ def find_previous_run(input_dir: Path) -> Path | None:
     if idx == 0:
         return None
     prev = parent / siblings[idx - 1]
-    if not list(prev.glob("tree_bench*.txt")):
-        return None
+    # Check for criterion JSON subdirs (binary directories)
+    has_json = any(
+        d.is_dir() and d.name.startswith("tree_bench")
+        for d in prev.iterdir()
+    )
+    if not has_json:
+        # Fallback: check for old divan .txt files for backwards compat
+        if not list(prev.glob("tree_bench*.txt")):
+            return None
     return prev
 
 
@@ -212,108 +305,23 @@ def build_previous_lookup(
         binary = result["binary"]
         for entry in result["entries"]:
             lookup[(binary, entry.name)] = PrevEntry(
-                fastest_ns=parse_time_to_ns(entry.fastest),
-                slowest_ns=parse_time_to_ns(entry.slowest),
-                median_ns=parse_time_to_ns(entry.median),
-                mean_ns=parse_time_to_ns(entry.mean),
+                fastest_ns=entry.fastest_ns,
+                slowest_ns=entry.slowest_ns,
+                median_ns=entry.median_ns,
+                mean_ns=entry.mean_ns,
             )
     return lookup
 
 
 def load_previous_results(prev_dir: Path) -> list[dict]:
-    """Load and parse benchmark results from a previous run directory."""
+    """Load benchmark results from a previous run directory (criterion JSON)."""
     results = []
-    for txt_file in sorted(prev_dir.glob("tree_bench*.txt")):
-        text = txt_file.read_text()
-        result = parse_divan_output(text, txt_file.stem)
-        if result and result["entries"]:
-            results.append(result)
+    for sub in sorted(prev_dir.iterdir()):
+        if sub.is_dir() and sub.name.startswith("tree_bench"):
+            result = parse_criterion_dir(sub)
+            if result and result["entries"]:
+                results.append(result)
     return results
-
-
-# ── Parsing ─────────────────────────────────────────────────────────────────
-
-
-def parse_divan_output(text: str, fallback_name: str) -> dict:
-    """Parse raw divan output text into structured data."""
-    binary_name = fallback_name
-    entries: list[BenchEntry] = []
-    current_parent: str | None = None
-    last_entry: BenchEntry | None = None
-
-    for raw_line in text.splitlines():
-        line = RE_ANSI.sub("", raw_line)
-
-        # Header line
-        m = RE_HEADER.match(line)
-        if m:
-            binary_name = m.group(1)
-            current_parent = None
-            continue
-
-        # Timing line
-        m = RE_TIMING.match(line)
-        if m:
-            indent, name, fastest, slowest, median, mean, samples, iters = m.groups()
-            depth = indent.count("\u2502")
-
-            if depth > 0 and current_parent:
-                full_name = f"{current_parent}_{name}"
-            else:
-                full_name = name
-                current_parent = None
-
-            entry = BenchEntry(
-                name=full_name,
-                raw_name=name,
-                parent=current_parent if depth > 0 else None,
-                fastest=fastest.strip(),
-                slowest=slowest.strip(),
-                median=median.strip(),
-                mean=mean.strip(),
-                samples=int(samples),
-                iters=int(iters),
-            )
-            entries.append(entry)
-            last_entry = entry
-            continue
-
-        # Throughput line
-        m = RE_THROUGHPUT.match(line)
-        if m and last_entry:
-            tp_f, tp_s, tp_med, tp_mean = m.groups()
-            last_entry.tp_fastest = tp_f.strip()
-            last_entry.tp_slowest = tp_s.strip()
-            last_entry.tp_median = tp_med.strip()
-            last_entry.tp_mean = tp_mean.strip()
-            continue
-
-        # Parent-only line (no timing data)
-        m = RE_PARENT.match(line)
-        if m:
-            current_parent = m.group(2)
-            last_entry = None
-            continue
-
-    return {"binary": binary_name, "entries": entries}
-
-
-def decompose_name(entry: BenchEntry) -> BenchId:
-    """Decompose a benchmark name into structured components."""
-    m = RE_BENCH_NAME.match(entry.name)
-    if not m:
-        return BenchId(operation=entry.name, n=0, count=0)
-
-    op, n, count, every = m.groups()
-    extra = {}
-    if every:
-        extra["every"] = int(every)
-    return BenchId(operation=op, n=int(n), count=int(count), extra=extra)
-
-
-def format_count(n: int) -> str:
-    """Format a count with thousand separators."""
-    return f"{n:,}"
 
 
 # ── Hierarchy construction ──────────────────────────────────────────────────
@@ -344,25 +352,34 @@ def build_hierarchy(
             if "every" in bid.extra:
                 label += f" (every {bid.extra['every']})"
 
+            # Compute throughput strings
+            tp_fastest = tp_slowest = tp_median = tp_mean = ""
+            if entry.throughput_elements:
+                elems = entry.throughput_elements
+                tp_fastest = format_throughput(elems, entry.fastest_ns)
+                tp_slowest = format_throughput(elems, entry.slowest_ns)
+                tp_median = format_throughput(elems, entry.median_ns)
+                tp_mean = format_throughput(elems, entry.mean_ns)
+
             # Compute diffs against previous run
             prev = prev_lookup.get((binary, entry.name)) if prev_lookup else None
 
             row = BenchRow(
                 label=label,
-                fastest=entry.fastest,
-                slowest=entry.slowest,
-                median=entry.median,
-                mean=entry.mean,
-                tp_fastest=entry.tp_fastest,
-                tp_slowest=entry.tp_slowest,
-                tp_median=entry.tp_median,
-                tp_mean=entry.tp_mean,
+                fastest=format_time_ns(entry.fastest_ns),
+                slowest=format_time_ns(entry.slowest_ns),
+                median=format_time_ns(entry.median_ns),
+                mean=format_time_ns(entry.mean_ns),
+                tp_fastest=tp_fastest,
+                tp_slowest=tp_slowest,
+                tp_median=tp_median,
+                tp_mean=tp_mean,
                 samples=entry.samples,
                 iters=entry.iters,
-                diff_fastest=compute_diff_pct(entry.fastest, prev.fastest_ns) if prev else None,
-                diff_slowest=compute_diff_pct(entry.slowest, prev.slowest_ns) if prev else None,
-                diff_median=compute_diff_pct(entry.median, prev.median_ns) if prev else None,
-                diff_mean=compute_diff_pct(entry.mean, prev.mean_ns) if prev else None,
+                diff_fastest=compute_diff_pct(entry.fastest_ns, prev.fastest_ns) if prev else None,
+                diff_slowest=compute_diff_pct(entry.slowest_ns, prev.slowest_ns) if prev else None,
+                diff_median=compute_diff_pct(entry.median_ns, prev.median_ns) if prev else None,
+                diff_mean=compute_diff_pct(entry.mean_ns, prev.mean_ns) if prev else None,
             )
             hierarchy[binary][op][n_key].append(row)
 
@@ -708,7 +725,7 @@ def read_meta(path: Path) -> dict[str, str]:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input_dir", help="Directory containing .txt files")
+    parser.add_argument("input_dir", help="Directory containing criterion JSON subdirs")
     parser.add_argument("--meta", help="Path to meta.txt")
     parser.add_argument(
         "-o", "--output", help="Output HTML path (default: <input_dir>/report.html)"
@@ -730,13 +747,13 @@ def main():
     meta = read_meta(Path(args.meta)) if args.meta else {}
 
     all_results = []
-    for txt_file in sorted(input_dir.glob("tree_bench*.txt")):
-        text = txt_file.read_text()
-        result = parse_divan_output(text, txt_file.stem)
-        if result and result["entries"]:
-            all_results.append(result)
-        else:
-            print(f"Warning: no benchmark entries in {txt_file.name}", file=sys.stderr)
+    for sub in sorted(input_dir.iterdir()):
+        if sub.is_dir() and sub.name.startswith("tree_bench"):
+            result = parse_criterion_dir(sub)
+            if result and result["entries"]:
+                all_results.append(result)
+            else:
+                print(f"Warning: no benchmark entries in {sub.name}", file=sys.stderr)
 
     if not all_results:
         print("Error: no benchmark results found", file=sys.stderr)

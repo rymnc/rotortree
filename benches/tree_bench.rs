@@ -1,188 +1,244 @@
-use rotortree::{
-    Blake3Hasher,
-    LeanIMT,
-    TreeHasher,
+use criterion::{
+    BatchSize, BenchmarkId, Throughput, criterion_group, criterion_main,
 };
+use rotortree::{Blake3Hasher, LeanIMT, TreeHasher};
 
 mod common;
 use common::generate_leaves;
 
-fn main() {
-    divan::main();
-}
-
 #[crabtime::function]
 fn bench_insert_single(n_values: Vec<usize>) {
-    let counts = [1_000usize, 10_000, 100_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn insert_single_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let leaves = generate_leaves({{count}});
-                    bencher
-                        .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher))
-                        .bench_local_refs(|tree| {
-                            for &leaf in &leaves {
-                                divan::black_box(tree.insert(leaf).unwrap());
-                            }
-                        });
+        crabtime::output! {
+            fn insert_single_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("insert_single/n", {{n}}));
+                for count in [1_000usize, 10_000, 100_000] {
+                    let leaves = generate_leaves(count);
+                    group.throughput(Throughput::Elements(count as u64));
+                    group.bench_with_input(
+                        BenchmarkId::from_parameter(count),
+                        &leaves,
+                        |b, leaves| {
+                            b.iter_batched_ref(
+                                || LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher),
+                                |tree| {
+                                    for &leaf in leaves {
+                                        std::hint::black_box(tree.insert(leaf).unwrap());
+                                    }
+                                },
+                                BatchSize::LargeInput,
+                            );
+                        },
+                    );
                 }
+                group.finish();
             }
         }
     }
 }
-
-bench_insert_single!([2, 4, 8, 16]);
 
 #[crabtime::function]
 fn bench_insert_many(n_values: Vec<usize>) {
-    let counts = [1_000usize, 10_000, 100_000, 1_000_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn insert_many_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let leaves = generate_leaves({{count}});
-                    bencher
-                        .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher))
-                        .bench_local_refs(|tree| {
-                            divan::black_box(tree.insert_many(&leaves).unwrap());
-                        });
+        crabtime::output! {
+            fn insert_many_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("insert_many/n", {{n}}));
+                for count in [1_000usize, 10_000, 100_000, 1_000_000] {
+                    let leaves = generate_leaves(count);
+                    group.throughput(Throughput::Elements(count as u64));
+                    group.bench_with_input(
+                        BenchmarkId::from_parameter(count),
+                        &leaves,
+                        |b, leaves| {
+                            b.iter_batched_ref(
+                                || LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher),
+                                |tree| {
+                                    std::hint::black_box(tree.insert_many(leaves).unwrap());
+                                },
+                                BatchSize::LargeInput,
+                            );
+                        },
+                    );
                 }
+                group.finish();
             }
         }
     }
 }
-
-bench_insert_many!([2, 4, 8, 16]);
 
 #[crabtime::function]
 fn bench_insert_many_chunked_100(n_values: Vec<usize>) {
-    let counts = [10_000usize, 100_000, 1_000_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn insert_many_chunked_100_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let leaves = generate_leaves({{count}});
-                    bencher
-                        .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher))
-                        .bench_local_refs(|tree| {
-                            for chunk in leaves.chunks(100) {
-                                divan::black_box(tree.insert_many(chunk).unwrap());
-                            }
-                        });
+        crabtime::output! {
+            fn insert_many_chunked_100_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("insert_many_chunked_100/n", {{n}}));
+                for count in [10_000usize, 100_000, 1_000_000] {
+                    let leaves = generate_leaves(count);
+                    group.throughput(Throughput::Elements(count as u64));
+                    group.bench_with_input(
+                        BenchmarkId::from_parameter(count),
+                        &leaves,
+                        |b, leaves| {
+                            b.iter_batched_ref(
+                                || LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher),
+                                |tree| {
+                                    for chunk in leaves.chunks(100) {
+                                        std::hint::black_box(tree.insert_many(chunk).unwrap());
+                                    }
+                                },
+                                BatchSize::LargeInput,
+                            );
+                        },
+                    );
                 }
+                group.finish();
             }
         }
     }
 }
-
-bench_insert_many_chunked_100!([2, 4, 8, 16]);
 
 #[crabtime::function]
 fn bench_insert_many_chunked_1000(n_values: Vec<usize>) {
-    let counts = [10_000usize, 100_000, 1_000_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn insert_many_chunked_1000_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let leaves = generate_leaves({{count}});
-                    bencher
-                        .counter(divan::counter::ItemsCount::new({{count}} as usize))
-                        .with_inputs(|| LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher))
-                        .bench_local_refs(|tree| {
-                            for chunk in leaves.chunks(1000) {
-                                divan::black_box(tree.insert_many(chunk).unwrap());
-                            }
-                        });
+        crabtime::output! {
+            fn insert_many_chunked_1000_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("insert_many_chunked_1000/n", {{n}}));
+                for count in [10_000usize, 100_000, 1_000_000] {
+                    let leaves = generate_leaves(count);
+                    group.throughput(Throughput::Elements(count as u64));
+                    group.bench_with_input(
+                        BenchmarkId::from_parameter(count),
+                        &leaves,
+                        |b, leaves| {
+                            b.iter_batched_ref(
+                                || LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher),
+                                |tree| {
+                                    for chunk in leaves.chunks(1000) {
+                                        std::hint::black_box(tree.insert_many(chunk).unwrap());
+                                    }
+                                },
+                                BatchSize::LargeInput,
+                            );
+                        },
+                    );
                 }
+                group.finish();
             }
         }
     }
 }
-
-bench_insert_many_chunked_1000!([2, 4, 8, 16]);
 
 #[crabtime::function]
 fn bench_insert_incremental(n_values: Vec<usize>) {
-    let counts = [10_000usize, 100_000, 1_000_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn insert_incremental_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let all_leaves = generate_leaves({{count}});
-                    let half = {{count}} / 2;
+        crabtime::output! {
+            fn insert_incremental_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("insert_incremental/n", {{n}}));
+                for count in [10_000usize, 100_000, 1_000_000] {
+                    let all_leaves = generate_leaves(count);
+                    let half = count / 2;
                     let (first_half, second_half) = all_leaves.split_at(half);
-                    bencher
-                        .counter(divan::counter::ItemsCount::new(second_half.len()))
-                        .with_inputs(|| {
-                            let mut tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
-                            tree.insert_many(first_half).unwrap();
-                            tree
-                        })
-                        .bench_local_refs(|tree| {
-                            divan::black_box(tree.insert_many(second_half).unwrap());
-                        });
+                    let first_half = first_half.to_vec();
+                    let second_half = second_half.to_vec();
+                    group.throughput(Throughput::Elements(second_half.len() as u64));
+                    group.bench_with_input(
+                        BenchmarkId::from_parameter(count),
+                        &(first_half.clone(), second_half.clone()),
+                        |b, (first_half, second_half)| {
+                            b.iter_batched_ref(
+                                || {
+                                    let mut tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
+                                    tree.insert_many(first_half).unwrap();
+                                    tree
+                                },
+                                |tree| {
+                                    std::hint::black_box(tree.insert_many(second_half).unwrap());
+                                },
+                                BatchSize::LargeInput,
+                            );
+                        },
+                    );
                 }
+                group.finish();
             }
         }
     }
 }
-
-bench_insert_incremental!([2, 4, 8, 16]);
 
 #[crabtime::function]
 fn bench_generate_proof(n_values: Vec<usize>) {
-    let counts = [1_000usize, 10_000, 100_000, 1_000_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn generate_proof_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let leaves = generate_leaves({{count}});
+        crabtime::output! {
+            fn generate_proof_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("generate_proof/n", {{n}}));
+                for count in [1_000usize, 10_000, 100_000, 1_000_000] {
+                    let leaves = generate_leaves(count);
                     let mut tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
                     tree.insert_many(&leaves).unwrap();
                     let snap = tree.snapshot();
-                    let mid = ({{count}} / 2) as u64;
-                    bencher.bench_local(|| {
-                        divan::black_box(snap.generate_proof(mid).unwrap());
+                    let mid = (count / 2) as u64;
+                    group.bench_function(BenchmarkId::from_parameter(count), |b| {
+                        b.iter(|| {
+                            std::hint::black_box(snap.generate_proof(mid).unwrap());
+                        });
                     });
                 }
+                group.finish();
             }
         }
     }
 }
 
-bench_generate_proof!([2, 4, 8, 16]);
-
 #[crabtime::function]
 fn bench_verify_proof(n_values: Vec<usize>) {
-    let counts = [1_000usize, 10_000, 100_000, 1_000_000];
     for n in n_values {
-        for count in counts {
-            crabtime::output! {
-                #[divan::bench]
-                fn verify_proof_n{{n}}_{{count}}(bencher: divan::Bencher) {
-                    let leaves = generate_leaves({{count}});
+        crabtime::output! {
+            fn verify_proof_n{{n}}(c: &mut criterion::Criterion) {
+                let mut group = c.benchmark_group(concat!("verify_proof/n", {{n}}));
+                for count in [1_000usize, 10_000, 100_000, 1_000_000] {
+                    let leaves = generate_leaves(count);
                     let mut tree = LeanIMT::<Blake3Hasher, {{n}}, 32>::new(Blake3Hasher);
                     tree.insert_many(&leaves).unwrap();
                     let snap = tree.snapshot();
                     let proof = snap.generate_proof(0).unwrap();
                     let th = TreeHasher::new(Blake3Hasher);
-                    bencher.bench_local(|| {
-                        divan::black_box(proof.verify(&th).unwrap());
+                    group.bench_function(BenchmarkId::from_parameter(count), |b| {
+                        b.iter(|| {
+                            std::hint::black_box(proof.verify(&th).unwrap());
+                        });
                     });
                 }
+                group.finish();
             }
         }
     }
 }
 
-bench_verify_proof!([2, 4, 8, 16]);
+#[crabtime::function]
+fn define_harness(n_values: Vec<usize>) {
+    for n in n_values {
+        crabtime::output! {
+            bench_insert_single!([{{n}}]);
+            bench_insert_many!([{{n}}]);
+            bench_insert_many_chunked_100!([{{n}}]);
+            bench_insert_many_chunked_1000!([{{n}}]);
+            bench_insert_incremental!([{{n}}]);
+            bench_generate_proof!([{{n}}]);
+            bench_verify_proof!([{{n}}]);
+
+            criterion_group!(
+                benches_n{{n}},
+                insert_single_n{{n}},
+                insert_many_n{{n}},
+                insert_many_chunked_100_n{{n}},
+                insert_many_chunked_1000_n{{n}},
+                insert_incremental_n{{n}},
+                generate_proof_n{{n}},
+                verify_proof_n{{n}}
+            );
+        }
+    }
+}
+
+define_harness!([2, 4, 8, 16]);
+criterion_main!(benches_n2, benches_n4, benches_n8, benches_n16);

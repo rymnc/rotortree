@@ -35,7 +35,7 @@ serde_with = { version = "3.17", default-features = false, optional = true }
 
 [dev-dependencies]
 proptest = "1"
-divan = "0.1"
+criterion = { version = "0.8", features = ["html_reports"] }
 crabtime = "1.1.4"
 tempfile = "3"
 tikv-jemallocator = "0.6"
