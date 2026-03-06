@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Run all rotortree divan benchmarks and generate an HTML report.
+# Run all rotortree criterion benchmarks and generate an HTML report.
 #
 # Usage:
 #   ./scripts/run_benchmarks.sh [--output-dir DIR]
@@ -60,15 +60,16 @@ for spec in "${BENCHES[@]}"; do
         FEAT_ARG="--features $features"
     fi
 
-    if RUSTFLAGS="$EXTRA_RUSTFLAGS" cargo bench \
+    # Set CRITERION_HOME so each binary writes JSON to its own isolated directory
+    if RUSTFLAGS="$EXTRA_RUSTFLAGS" CRITERION_HOME="$RESULT_DIR/$bench_name" \
+        cargo bench \
         --manifest-path "$PROJECT_DIR/Cargo.toml" \
-        --bench "$bench_name" $FEAT_ARG \
-        > "$RESULT_DIR/${bench_name}.txt" 2>&1; then
+        --bench "$bench_name" $FEAT_ARG 2>&1; then
         END=$(date +%s)
         echo "    done ($((END - START))s)"
     else
         END=$(date +%s)
-        echo "    FAILED ($((END - START))s) — output saved"
+        echo "    FAILED ($((END - START))s)"
         FAILED=$((FAILED + 1))
     fi
 done
