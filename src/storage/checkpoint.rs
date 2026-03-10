@@ -14,7 +14,7 @@ use std::{
 
 use crate::{
     Hash,
-    tree::CHUNK_SIZE,
+    chunked_level::CHUNK_SIZE,
 };
 
 use super::{

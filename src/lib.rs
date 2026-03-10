@@ -23,6 +23,7 @@ use {
     tikv_jemallocator as _,
 };
 
+pub(crate) mod chunked_level;
 mod error;
 mod hash;
 mod proof;

@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::tree::{
+use crate::chunked_level::{
     CHUNK_SIZE,
     Chunk,
 };
