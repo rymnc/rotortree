@@ -53,7 +53,7 @@ the tree design itself is heavily inspired by [lean-imt](https://zkkit.org/leani
 use `LeanIMT` 
 
 ```rust
-use rotortree::{LeanIMT, Blake3Hasher, TreeHasher};
+use rotortree::{LeanIMT, Blake3Hasher};
 
 // N=4 branching factor, MAX_DEPTH=20
 let mut tree = LeanIMT::<Blake3Hasher, 4, 20>::new(Blake3Hasher);
@@ -75,8 +75,7 @@ let root = tree.insert_many(&leaves).unwrap();
 // proof generation & verification
 let snap = tree.snapshot();
 let proof = snap.generate_proof(0).unwrap();
-let th = TreeHasher::new(Blake3Hasher);
-assert!(proof.verify(&th).unwrap());
+assert!(proof.verify(&Blake3Hasher).unwrap());
 ```
 
 optional feature flags for the in-memory mode:
@@ -88,7 +87,7 @@ optional feature flags for the in-memory mode:
 
 ```rust
 use rotortree::{
-    Blake3Hasher, RotorTree, RotorTreeConfig, TreeHasher,
+    Blake3Hasher, RotorTree, RotorTreeConfig,
     FlushPolicy, CheckpointPolicy, TieringConfig,
 };
 use std::path::PathBuf;
@@ -118,8 +117,7 @@ let (root, token) = tree.insert_many(&leaves).unwrap();
 // lock-free snapshot for proof generation (same as in-memory)
 let snap = tree.snapshot();
 let proof = snap.generate_proof(0).unwrap();
-let th = TreeHasher::new(Blake3Hasher);
-assert!(proof.verify(&th).unwrap());
+assert!(proof.verify(&Blake3Hasher).unwrap());
 
 // explicit flush & close
 tree.flush().unwrap();

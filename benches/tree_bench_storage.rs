@@ -11,7 +11,6 @@ use rotortree::{
     FlushPolicy,
     RotorTree,
     RotorTreeConfig,
-    TreeHasher,
 };
 
 mod common;
@@ -201,7 +200,7 @@ fn bench_mixed_workload(n_values: Vec<usize>) {
                 for tick in [100usize, 1_000, 10_000, 100_000] {
                     let prepop_leaves = generate_leaves(10_000);
                     let tick_leaves = generate_leaves(tick);
-                    let th = TreeHasher::new(Blake3Hasher);
+                    let th = Blake3Hasher;
                     group.throughput(Throughput::Elements(tick as u64));
                     group.bench_with_input(
                         BenchmarkId::from_parameter(tick),
@@ -256,7 +255,7 @@ fn bench_sustained_checkpoint(n_values: Vec<usize>) {
                 for count in [100_000usize, 1_000_000] {
                     for freq in [5usize, 25, 100, 500] {
                         let leaves = generate_leaves(count);
-                        let th = TreeHasher::new(Blake3Hasher);
+                        let th = Blake3Hasher;
                         group.throughput(Throughput::Elements(count as u64));
                         group.bench_with_input(
                             BenchmarkId::new(format!("every{freq}"), count),

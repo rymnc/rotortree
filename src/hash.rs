@@ -15,44 +15,16 @@ pub trait Hasher: Clone + Send + Sync + 'static {
 
     /// Create a fresh hashing state
     fn new_state(&self) -> Self::State;
-}
 
-/// Domain-separated hasher for Merkle tree operations.
-///
-/// Wraps any [`Hasher`] and enforces leaf/internal-node domain
-///
-/// - Leaves are hashed with a `0x00` prefix tag
-/// - Internal nodes are hashed with a `0x01` prefix tag + child count
-#[derive(Clone, Debug)]
-pub struct TreeHasher<H>(H);
-
-impl<H: Hasher> TreeHasher<H> {
-    #[inline(always)]
-    pub fn new(hasher: H) -> Self {
-        Self(hasher)
-    }
-
-    pub fn inner(&self) -> &H {
-        &self.0
-    }
-
-    #[inline(always)]
-    pub fn hash_leaf(&self, leaf: &Hash) -> Hash {
-        let mut buf = [0u8; 33];
-        buf[1..].copy_from_slice(leaf);
-        let mut state = self.0.new_state();
-        state.update(&buf);
-        state.finalize()
-    }
-
-    #[inline(always)]
-    pub fn hash_children(&self, children: &[Hash]) -> Hash {
-        let len = children.len();
-        debug_assert!(len <= u8::MAX as usize);
-
-        let mut state = self.0.new_state();
-        #[allow(clippy::cast_possible_truncation)]
-        state.update(&[0x01, len as u8]);
+    /// Hash the concatenation of child node hashes into their parent.
+    ///
+    /// Children are hashed verbatim, with no domain tag and no length
+    /// prefix, so an internal node is `hash(child_0 || child_1 || ...)`.
+    /// This matches the canonical Lean IMT node hash and keeps the
+    /// digest compatible with other implementations.
+    #[inline]
+    fn hash_children(&self, children: &[Hash]) -> Hash {
+        let mut state = self.new_state();
         state.update(children.as_flattened());
         state.finalize()
     }

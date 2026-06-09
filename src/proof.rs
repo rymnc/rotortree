@@ -2,7 +2,6 @@ use crate::{
     Hash,
     Hasher,
     TreeError,
-    TreeHasher,
     tree::{
         TreeSnapshot,
         ceil_log_n,
@@ -67,7 +66,7 @@ pub struct NaryProof<const N: usize, const MAX_DEPTH: usize> {
 
 impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
     /// Verify this proof against the given hasher.
-    pub fn verify<H: Hasher>(&self, hasher: &TreeHasher<H>) -> Result<bool, TreeError> {
+    pub fn verify<H: Hasher>(&self, hasher: &H) -> Result<bool, TreeError> {
         if self.tree_size == 0 || self.leaf_index >= self.tree_size {
             return Err(TreeError::MathError);
         }
@@ -113,7 +112,7 @@ impl<const N: usize, const MAX_DEPTH: usize> NaryProof<N, MAX_DEPTH> {
     /// Verify this inclusion proof against an externally-trusted root.
     pub fn verify_against<H: Hasher>(
         &self,
-        hasher: &TreeHasher<H>,
+        hasher: &H,
         trusted_root: Hash,
     ) -> Result<bool, TreeError> {
         if self.root != trusted_root {
@@ -184,7 +183,7 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
     /// Verify this consistency proof against the given hasher.
     ///
     /// Returns `Ok(true)` if both reconstructed roots match.
-    pub fn verify<H: Hasher>(&self, hasher: &TreeHasher<H>) -> Result<bool, TreeError> {
+    pub fn verify<H: Hasher>(&self, hasher: &H) -> Result<bool, TreeError> {
         if self.old_size == 0
             || self.new_size == 0
             || self.old_size > self.new_size
@@ -274,7 +273,7 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
     /// Verify this consistency proof against externally-trusted roots.
     pub fn verify_against<H: Hasher>(
         &self,
-        hasher: &TreeHasher<H>,
+        hasher: &H,
         trusted_old_root: Hash,
         trusted_new_root: Hash,
     ) -> Result<bool, TreeError> {
@@ -289,7 +288,7 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
     /// If verification succeeds, the caller can trust `self.new_root`.
     pub fn verify_transition<H: Hasher>(
         &self,
-        hasher: &TreeHasher<H>,
+        hasher: &H,
         trusted_old_root: Hash,
     ) -> Result<bool, TreeError> {
         self.verify_against(hasher, trusted_old_root, self.new_root)
@@ -303,7 +302,7 @@ impl<const N: usize, const MAX_DEPTH: usize> ConsistencyProof<N, MAX_DEPTH> {
     pub fn update_inclusion_proof<H: Hasher>(
         &self,
         old_proof: &NaryProof<N, MAX_DEPTH>,
-        hasher: &TreeHasher<H>,
+        hasher: &H,
     ) -> Result<NaryProof<N, MAX_DEPTH>, TreeError> {
         if old_proof.root != self.old_root {
             return Err(TreeError::MathError);
@@ -578,7 +577,7 @@ mod tests {
                     .generate_consistency_proof(snaps[i].0, snaps[i].1)
                     .unwrap();
                 assert!(
-                    proof.verify(&TreeHasher::new(XorHasher)).unwrap(),
+                    proof.verify(&XorHasher).unwrap(),
                     "N={} consistency failed for {} -> {}",
                     N,
                     i + 1,
@@ -602,19 +601,15 @@ mod tests {
                 if i == j {
                     // Same-size update returns NoUpdateNeeded
                     let ip = snaps[i].2.generate_proof(0).unwrap();
-                    let err = cp
-                        .update_inclusion_proof(&ip, &TreeHasher::new(XorHasher))
-                        .unwrap_err();
+                    let err = cp.update_inclusion_proof(&ip, &XorHasher).unwrap_err();
                     assert_eq!(err, TreeError::NoUpdateNeeded);
                     continue;
                 }
                 for m in 0..=i {
                     let old_ip = snaps[i].2.generate_proof(m as u64).unwrap();
-                    let updated = cp
-                        .update_inclusion_proof(&old_ip, &TreeHasher::new(XorHasher))
-                        .unwrap();
+                    let updated = cp.update_inclusion_proof(&old_ip, &XorHasher).unwrap();
                     assert!(
-                        updated.verify(&TreeHasher::new(XorHasher)).unwrap(),
+                        updated.verify(&XorHasher).unwrap(),
                         "N={} update failed: member {} from {} -> {}",
                         N,
                         m,
@@ -641,7 +636,7 @@ mod tests {
 
     #[test]
     fn proof_single_leaf() {
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
         let l = leaf(1);
         tree.insert(l).unwrap();
@@ -658,7 +653,7 @@ mod tests {
     #[test]
     fn proof_two_leaves_binary() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
         let l0 = leaf(1);
         let l1 = leaf(2);
@@ -685,7 +680,7 @@ mod tests {
     #[test]
     fn proof_three_leaves_binary_lifted() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
         let l0 = leaf(1);
         let l1 = leaf(2);
@@ -708,7 +703,7 @@ mod tests {
     #[test]
     fn proof_four_leaves_binary() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
         let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
         for &l in &leaves {
@@ -726,7 +721,7 @@ mod tests {
     #[test]
     fn proof_ternary() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 3, 32>::new(h.clone());
         let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
         for &l in &leaves {
@@ -743,7 +738,7 @@ mod tests {
     #[test]
     fn proof_quaternary() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 4, 32>::new(h.clone());
         let leaves: Vec<Hash> = (1..=5).map(leaf).collect();
         for &l in &leaves {
@@ -760,7 +755,7 @@ mod tests {
     #[test]
     fn verify_rejects_wrong_leaf() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
         tree.insert(leaf(1)).unwrap();
         tree.insert(leaf(2)).unwrap();
@@ -774,7 +769,7 @@ mod tests {
     #[test]
     fn verify_rejects_wrong_root() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
         tree.insert(leaf(1)).unwrap();
         tree.insert(leaf(2)).unwrap();
@@ -788,7 +783,7 @@ mod tests {
     #[test]
     fn verify_rejects_wrong_sibling() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
         tree.insert(leaf(1)).unwrap();
         tree.insert(leaf(2)).unwrap();
@@ -814,7 +809,7 @@ mod tests {
     fn proof_blake3_round_trip() {
         use crate::Blake3Hasher;
         let h = Blake3Hasher;
-        let th = TreeHasher::new(Blake3Hasher);
+        let th = Blake3Hasher;
         let mut tree = LeanIMT::<Blake3Hasher, 2, 32>::new(h);
 
         for i in 0u8..20 {
@@ -841,7 +836,7 @@ mod tests {
             let bytes = wincode::serialize(&proof).unwrap();
             let decoded: NaryProof<N, 32> = wincode::deserialize(&bytes).unwrap();
             assert_eq!(decoded, proof);
-            assert!(decoded.verify(&TreeHasher::new(XorHasher)).unwrap());
+            assert!(decoded.verify(&XorHasher).unwrap());
         }
     }
 
@@ -872,7 +867,7 @@ mod tests {
         let root = snap.root().unwrap();
         let proof = snap.generate_consistency_proof(2, root).unwrap();
         assert_eq!(proof.level_count, 0);
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
+        assert!(proof.verify(&XorHasher).unwrap());
     }
 
     #[test]
@@ -900,7 +895,7 @@ mod tests {
             .unwrap();
         let mut tampered = proof;
         tampered.old_root = [0xFF; 32];
-        assert!(!tampered.verify(&TreeHasher::new(XorHasher)).unwrap());
+        assert!(!tampered.verify(&XorHasher).unwrap());
     }
 
     #[test]
@@ -913,7 +908,7 @@ mod tests {
             .unwrap();
         let mut tampered = proof;
         tampered.new_root = [0xFF; 32];
-        assert!(!tampered.verify(&TreeHasher::new(XorHasher)).unwrap());
+        assert!(!tampered.verify(&XorHasher).unwrap());
     }
 
     #[test]
@@ -928,7 +923,7 @@ mod tests {
         if tampered.level_count > 0 {
             tampered.levels[0].hashes[0] = [0xFF; 32];
         }
-        assert!(!tampered.verify(&TreeHasher::new(XorHasher)).unwrap());
+        assert!(!tampered.verify(&XorHasher).unwrap());
     }
 
     #[test]
@@ -950,7 +945,7 @@ mod tests {
             level_count: 0,
             levels: [ConsistencyLevel::EMPTY; 32],
         };
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).is_err());
+        assert!(proof.verify(&XorHasher).is_err());
     }
 
     #[test]
@@ -963,7 +958,7 @@ mod tests {
             level_count: 0,
             levels: [ConsistencyLevel::EMPTY; 32],
         };
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).is_err());
+        assert!(proof.verify(&XorHasher).is_err());
     }
 
     #[test]
@@ -975,9 +970,7 @@ mod tests {
         let root = snap.root().unwrap();
         let cp = snap.generate_consistency_proof(2, root).unwrap();
         let ip = snap.generate_proof(0).unwrap();
-        let err = cp
-            .update_inclusion_proof(&ip, &TreeHasher::new(XorHasher))
-            .unwrap_err();
+        let err = cp.update_inclusion_proof(&ip, &XorHasher).unwrap_err();
         assert_eq!(err, TreeError::NoUpdateNeeded);
     }
 
@@ -1006,10 +999,7 @@ mod tests {
             .unwrap();
         let mut bad_proof = snaps[1].2.generate_proof(0).unwrap();
         bad_proof.root = [0xFF; 32];
-        assert!(
-            cp.update_inclusion_proof(&bad_proof, &TreeHasher::new(XorHasher))
-                .is_err()
-        );
+        assert!(cp.update_inclusion_proof(&bad_proof, &XorHasher).is_err());
     }
 
     #[cfg(feature = "wincode")]
@@ -1023,7 +1013,7 @@ mod tests {
         let bytes = wincode::serialize(&proof).unwrap();
         let decoded: ConsistencyProof<N, 32> = wincode::deserialize(&bytes).unwrap();
         assert_eq!(decoded, proof);
-        assert!(decoded.verify(&TreeHasher::new(XorHasher)).unwrap());
+        assert!(decoded.verify(&XorHasher).unwrap());
     }
 
     #[cfg(feature = "wincode")]
@@ -1054,7 +1044,7 @@ mod tests {
             level_count: 5,
             levels: [ProofLevel::EMPTY; 4],
         };
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).is_err());
+        assert!(proof.verify(&XorHasher).is_err());
     }
 
     #[test]
@@ -1065,7 +1055,7 @@ mod tests {
         let snap = tree.snapshot();
         let mut proof = snap.generate_proof(0).unwrap();
         proof.levels[0].position = 2;
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).is_err());
+        assert!(proof.verify(&XorHasher).is_err());
     }
 
     #[test]
@@ -1076,7 +1066,7 @@ mod tests {
         let snap = tree.snapshot();
         let mut proof = snap.generate_proof(0).unwrap();
         proof.levels[0].sibling_count = 2;
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).is_err());
+        assert!(proof.verify(&XorHasher).is_err());
     }
 
     #[test]
@@ -1089,13 +1079,13 @@ mod tests {
             level_count: 5,
             levels: [ConsistencyLevel::EMPTY; 4],
         };
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).is_err());
+        assert!(proof.verify(&XorHasher).is_err());
     }
 
     #[test]
     fn verify_rejects_spoofed_leaf_index() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
         tree.insert(leaf(1)).unwrap();
         tree.insert(leaf(2)).unwrap();
@@ -1109,7 +1099,7 @@ mod tests {
     #[test]
     fn verify_rejects_padded_levels() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
         tree.insert(leaf(1)).unwrap();
         tree.insert(leaf(2)).unwrap();
@@ -1125,7 +1115,7 @@ mod tests {
     #[test]
     fn verify_rejects_truncated_levels() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
         for i in 1..=4u32 {
             tree.insert(leaf(i)).unwrap();
@@ -1148,13 +1138,13 @@ mod tests {
             level_count: 0,
             levels: [ProofLevel::EMPTY; 4],
         };
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).is_err());
+        assert!(proof.verify(&XorHasher).is_err());
     }
 
     #[test]
     fn verify_rejects_leaf_index_ge_tree_size() {
         let h = XorHasher;
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(h.clone());
         tree.insert(leaf(1)).unwrap();
         tree.insert(leaf(2)).unwrap();
@@ -1177,7 +1167,7 @@ mod tests {
             level_count: 5,
             levels: [ProofLevel::EMPTY; 4],
         };
-        match proof.verify(&TreeHasher::new(XorHasher)) {
+        match proof.verify(&XorHasher) {
             Err(TreeError::InvalidProofDepth {
                 expected: 5,
                 actual: 5,

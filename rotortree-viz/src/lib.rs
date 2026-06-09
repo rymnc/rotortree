@@ -1,4 +1,4 @@
-use rotortree::{Blake3Hasher, Hash, LeanIMT, TreeHasher, TreeSnapshot};
+use rotortree::{Blake3Hasher, Hash, LeanIMT, TreeSnapshot};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 

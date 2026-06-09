@@ -26,7 +26,6 @@ use rotortree::{
     RotorTree,
     RotorTreeConfig,
     TieringConfig,
-    TreeHasher,
 };
 use std::{
     mem,
@@ -65,7 +64,7 @@ fn generate_leaves(start: u64, count: u64) -> Vec<Hash> {
 
 fn full_node(tx: mpsc::Sender<NodeMessage>, rx: mpsc::Receiver<ClientMessage>) {
     let hasher = Blake3Hasher;
-    let th = TreeHasher::new(Blake3Hasher);
+    let th = Blake3Hasher;
     let _ = std::fs::remove_dir_all(DB_PATH);
     let config = RotorTreeConfig {
         path: PathBuf::from(DB_PATH),
@@ -130,7 +129,7 @@ fn full_node(tx: mpsc::Sender<NodeMessage>, rx: mpsc::Receiver<ClientMessage>) {
 
 fn light_client(tx: mpsc::Sender<ClientMessage>, rx: mpsc::Receiver<NodeMessage>) {
     let hasher = Blake3Hasher;
-    let th = TreeHasher::new(Blake3Hasher);
+    let th = Blake3Hasher;
     let mut tracked_proof: Option<NaryProof<N, MAX_DEPTH>> = None;
     let mut current_root: Option<Hash> = None;
 

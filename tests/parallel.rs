@@ -4,7 +4,6 @@
 use rotortree::{
     Hash,
     LeanIMT,
-    TreeHasher,
     test_util::XorHasher,
 };
 
@@ -75,7 +74,7 @@ fn parallel_large_batch_proofs() {
     let snap = tree.snapshot();
     for i in 0..2000u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
+        assert!(proof.verify(&XorHasher).unwrap());
     }
 }
 

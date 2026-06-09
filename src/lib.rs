@@ -42,7 +42,6 @@ pub use hash::{
     Hash,
     HashState,
     Hasher,
-    TreeHasher,
 };
 pub use proof::{
     ConsistencyLevel,

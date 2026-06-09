@@ -8,7 +8,6 @@ use std::{
 use rotortree::{
     Hash,
     LeanIMT,
-    TreeHasher,
     test_util::{
         XorHasher,
         leaf,
@@ -26,7 +25,7 @@ fn concurrent_insert_single_thread() {
     let snap = tree.snapshot();
     for i in 0..10u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
+        assert!(proof.verify(&XorHasher).unwrap());
     }
 }
 
@@ -61,7 +60,7 @@ fn concurrent_multi_thread_insert() {
     let snap = tree.snapshot();
     for i in 0..total as u64 {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
+        assert!(proof.verify(&XorHasher).unwrap());
     }
 }
 
@@ -93,7 +92,7 @@ fn concurrent_reader_writer() {
                     }
                     for i in 0..size {
                         let proof = snap.generate_proof(i).unwrap();
-                        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
+                        assert!(proof.verify(&XorHasher).unwrap());
                     }
                 }
             })
@@ -168,6 +167,6 @@ fn concurrent_insert_many() {
     let snap = tree.snapshot();
     for i in 0..total {
         let proof = snap.generate_proof(i).unwrap();
-        assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
+        assert!(proof.verify(&XorHasher).unwrap());
     }
 }

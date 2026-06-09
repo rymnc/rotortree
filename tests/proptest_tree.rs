@@ -4,7 +4,6 @@ use proptest::prelude::*;
 use rotortree::{
     Hash,
     LeanIMT,
-    TreeHasher,
     test_util::XorHasher,
 };
 
@@ -55,7 +54,7 @@ fn gen_proof_round_trip(n_values: Vec<usize>) {
                     let snap = tree.snapshot();
                     for i in 0..leaves.len() as u64 {
                         let proof = snap.generate_proof(i).unwrap();
-                        prop_assert!(proof.verify(&TreeHasher::new(XorHasher)).unwrap());
+                        prop_assert!(proof.verify(&XorHasher).unwrap());
                     }
                 }
             }
@@ -118,7 +117,7 @@ fn gen_consistency_proof(n_values: Vec<usize>) {
                             .generate_consistency_proof(sizes[i], roots[i])
                             .unwrap();
                         prop_assert!(
-                            proof.verify(&TreeHasher::new(XorHasher)).unwrap(),
+                            proof.verify(&XorHasher).unwrap(),
                             "n{{n}} consistency failed for size {} -> {}",
                             sizes[i],
                             final_snap.size()
@@ -156,11 +155,11 @@ fn gen_consistency_proof_update(n_values: Vec<usize>) {
                             .unwrap();
                         let old_ip = snaps[i].2.generate_proof(0).unwrap();
                         if i == last {
-                            let err = cp.update_inclusion_proof(&old_ip, &TreeHasher::new(XorHasher)).unwrap_err();
+                            let err = cp.update_inclusion_proof(&old_ip, &XorHasher).unwrap_err();
                             prop_assert_eq!(err, rotortree::TreeError::NoUpdateNeeded);
                             continue;
                         }
-                        let updated = cp.update_inclusion_proof(&old_ip, &TreeHasher::new(XorHasher)).unwrap();
+                        let updated = cp.update_inclusion_proof(&old_ip, &XorHasher).unwrap();
                         let fresh = snaps[last].2.generate_proof(0).unwrap();
                         prop_assert_eq!(updated, fresh,
                             "n{{n}} update mismatch: size {} -> {}", snaps[i].0, snaps[last].0);
@@ -203,7 +202,7 @@ proptest! {
         leaves in leaves_strategy(100)
     ) {
         let hasher = rotortree::Blake3Hasher;
-        let th = TreeHasher::new(rotortree::Blake3Hasher);
+        let th = rotortree::Blake3Hasher;
         let mut tree = LeanIMT::<rotortree::Blake3Hasher, 2, 32>::new(hasher);
         for &leaf in &leaves {
             tree.insert(leaf).unwrap();

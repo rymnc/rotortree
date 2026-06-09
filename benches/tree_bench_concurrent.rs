@@ -8,7 +8,6 @@ use criterion::{
 use rotortree::{
     Blake3Hasher,
     LeanIMT,
-    TreeHasher,
 };
 use std::sync::Arc;
 
@@ -148,7 +147,7 @@ fn bench_verify_proof(n_values: Vec<usize>) {
                     tree.insert_many(&leaves).unwrap();
                     let snap = tree.snapshot();
                     let proof = snap.generate_proof(0).unwrap();
-                    let th = TreeHasher::new(Blake3Hasher);
+                    let th = Blake3Hasher;
                     group.bench_function(BenchmarkId::from_parameter(count), |b| {
                         b.iter(|| {
                             std::hint::black_box(proof.verify(&th).unwrap());

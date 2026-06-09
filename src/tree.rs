@@ -2,7 +2,6 @@ use crate::{
     Hash,
     Hasher,
     TreeError,
-    TreeHasher,
     chunked_level::ChunkedLevel,
 };
 
@@ -127,10 +126,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
 
     /// Recompute the root hash from level 0 data bottom-up
     #[cfg(feature = "storage")]
-    pub(crate) fn recompute_root<H: Hasher>(
-        &self,
-        hasher: &TreeHasher<H>,
-    ) -> Option<Hash> {
+    pub(crate) fn recompute_root<H: Hasher>(&self, hasher: &H) -> Option<Hash> {
         use std::vec::Vec;
         if self.size == 0 {
             return None;
@@ -191,7 +187,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
         current: &[Hash],
         parent_idx: usize,
         len: usize,
-        hasher: &TreeHasher<H>,
+        hasher: &H,
     ) -> Hash {
         let start = parent_idx * N;
         let end = core::cmp::min(start + N, len);
@@ -226,7 +222,7 @@ impl<const N: usize, const MAX_DEPTH: usize> TreeInner<N, MAX_DEPTH> {
 /// - `N`: Branching factor (compile-time, must be >= 2)
 /// - `MAX_DEPTH`: Maximum tree depth (must be >= 1)
 pub struct LeanIMT<H: Hasher, const N: usize, const MAX_DEPTH: usize> {
-    hasher: TreeHasher<H>,
+    hasher: H,
     #[cfg(not(feature = "concurrent"))]
     #[cfg_attr(docsrs, doc(cfg(not(feature = "concurrent"))))]
     inner: TreeInner<N, MAX_DEPTH>,
@@ -245,7 +241,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         let () = Self::_ASSERT_N;
         let () = Self::_ASSERT_DEPTH;
         Self {
-            hasher: TreeHasher::new(hasher),
+            hasher,
             inner: TreeInner::new(),
         }
     }
@@ -257,7 +253,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         let () = Self::_ASSERT_N;
         let () = Self::_ASSERT_DEPTH;
         Self {
-            hasher: TreeHasher::new(hasher),
+            hasher,
             inner: parking_lot::RwLock::new(TreeInner::new()),
         }
     }
@@ -343,7 +339,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     #[inline]
     pub(crate) fn _insert(
         inner: &mut TreeInner<N, MAX_DEPTH>,
-        hasher: &TreeHasher<H>,
+        hasher: &H,
         leaf: Hash,
     ) -> Result<Hash, TreeError> {
         let new_size = inner
@@ -393,7 +389,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         child_level: &ChunkedLevel,
         parent_idx: usize,
         level_len: usize,
-        hasher: &TreeHasher<H>,
+        hasher: &H,
     ) -> Result<Hash, TreeError> {
         let group_start = parent_idx * N;
         let group_end = core::cmp::min(group_start + N, level_len);
@@ -417,7 +413,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         num_parents: usize,
         level_len: usize,
         is_root_level: bool,
-        hasher: &TreeHasher<H>,
+        hasher: &H,
         root: &mut Hash,
     ) -> Result<(), TreeError> {
         for parent_idx in start_parent..num_parents {
@@ -436,7 +432,7 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
 
     pub(crate) fn _insert_many(
         inner: &mut TreeInner<N, MAX_DEPTH>,
-        hasher: &TreeHasher<H>,
+        hasher: &H,
         leaves: &[Hash],
     ) -> Result<Hash, TreeError> {
         if leaves.is_empty() {
@@ -693,7 +689,7 @@ mod tests {
 
     #[test]
     fn insert_two_leaves_binary() {
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
         let l0 = leaf(1);
         let l1 = leaf(2);
@@ -708,7 +704,7 @@ mod tests {
 
     #[test]
     fn insert_three_leaves_binary() {
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
         let l0 = leaf(1);
         let l1 = leaf(2);
@@ -728,7 +724,7 @@ mod tests {
 
     #[test]
     fn insert_four_leaves_binary() {
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 2, 32>::new(XorHasher);
         let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
         for &l in &leaves {
@@ -747,7 +743,7 @@ mod tests {
 
     #[test]
     fn insert_four_leaves_ternary() {
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 3, 32>::new(XorHasher);
         let leaves: Vec<Hash> = (1..=4).map(leaf).collect();
         for &l in &leaves {
@@ -765,7 +761,7 @@ mod tests {
 
     #[test]
     fn insert_two_leaves_ternary() {
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 3, 32>::new(XorHasher);
         let l0 = leaf(1);
         let l1 = leaf(2);
@@ -779,7 +775,7 @@ mod tests {
 
     #[test]
     fn insert_five_leaves_quaternary() {
-        let th = TreeHasher::new(XorHasher);
+        let th = XorHasher;
         let mut tree = LeanIMT::<XorHasher, 4, 32>::new(XorHasher);
         let leaves: Vec<Hash> = (1..=5).map(leaf).collect();
         for &l in &leaves {
@@ -898,7 +894,7 @@ mod tests {
 
         #[test]
         fn binary_four_leaves_known_vector() {
-            let th = TreeHasher::new(Blake3Hasher);
+            let th = Blake3Hasher;
             let mut tree = LeanIMT::<Blake3Hasher, 2, 32>::new(Blake3Hasher);
 
             let l0 = blake3_leaf(0);
@@ -925,7 +921,7 @@ mod tests {
 
         #[test]
         fn ternary_four_leaves_known_vector() {
-            let th = TreeHasher::new(Blake3Hasher);
+            let th = Blake3Hasher;
             let mut tree = LeanIMT::<Blake3Hasher, 3, 32>::new(Blake3Hasher);
 
             let l0 = blake3_leaf(0);
@@ -948,7 +944,7 @@ mod tests {
 
         #[test]
         fn quaternary_five_leaves_known_vector() {
-            let th = TreeHasher::new(Blake3Hasher);
+            let th = Blake3Hasher;
             let mut tree = LeanIMT::<Blake3Hasher, 4, 32>::new(Blake3Hasher);
 
             let leaves: Vec<Hash> = (0..5).map(blake3_leaf).collect();

@@ -5,7 +5,6 @@ use rotortree::{
     RotorTree,
     RotorTreeConfig,
     TieringConfig,
-    TreeHasher,
 };
 use std::{
     env,
@@ -90,7 +89,7 @@ fn main() {
             let proof = snap.generate_proof(probe_index).unwrap();
             gen_times.push(t.elapsed());
             let t = Instant::now();
-            assert!(proof.verify(&TreeHasher::new(Blake3Hasher)).unwrap());
+            assert!(proof.verify(&Blake3Hasher).unwrap());
             verify_times.push(t.elapsed());
         }
         gen_times.sort();
