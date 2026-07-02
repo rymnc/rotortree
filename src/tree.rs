@@ -404,6 +404,14 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
     }
 
     /// Sequential inner loop for one level of `_insert_many`.
+    ///
+    /// Consecutive FULL groups (each exactly `N` children) at an eligible
+    /// arity are gathered into windows and hashed together via
+    /// [`Hasher::hash_many_into`], which lets a SIMD-capable hasher hash
+    /// several parents at once. The trailing partial group and the count==1
+    /// lift fall back to the scalar [`Self::_compute_parent`] path. For
+    /// hashers without a batch override this is identical to the old per-group
+    /// loop (the default `hash_many_into` is a scalar loop).
     #[inline]
     #[allow(clippy::too_many_arguments)]
     fn _insert_many_level_seq(
@@ -416,18 +424,98 @@ impl<H: Hasher, const N: usize, const MAX_DEPTH: usize> LeanIMT<H, N, MAX_DEPTH>
         hasher: &H,
         root: &mut Hash,
     ) -> Result<(), TreeError> {
-        for parent_idx in start_parent..num_parents {
-            let parent =
-                Self::_compute_parent(&levels[level], parent_idx, level_len, hasher)?;
-            let next_level = level + 1;
-            if next_level < levels.len() {
-                levels[next_level].set_preallocated(parent_idx, parent);
+        let next_level = level + 1;
+
+        if next_level < levels.len() {
+            // Split so the child level is borrowed immutably while the parent
+            // level is written mutably.
+            let (head, tail) = levels.split_at_mut(next_level);
+            let child = &head[level];
+            let parent = &mut tail[0];
+
+            // Leading full groups (count == N) batch through hash_many_into.
+            // The final group is full iff `level_len` is a multiple of N.
+            let full_parents = (level_len / N).max(start_parent);
+            Self::_batch_full_groups(child, parent, start_parent, full_parents, hasher);
+
+            // Trailing partial group / lift (empty range when level_len % N == 0).
+            for parent_idx in full_parents..num_parents {
+                let p = Self::_compute_parent(child, parent_idx, level_len, hasher)?;
+                parent.set_preallocated(parent_idx, p);
             }
+
+            // At the root level there is exactly one parent; it is the root.
             if is_root_level {
-                *root = parent;
+                *root = parent.get(num_parents - 1)?;
+            }
+        } else {
+            // No parent level to write into: compute scalar, track root only.
+            for parent_idx in start_parent..num_parents {
+                let p =
+                    Self::_compute_parent(&levels[level], parent_idx, level_len, hasher)?;
+                if is_root_level {
+                    *root = p;
+                }
             }
         }
         Ok(())
+    }
+
+    /// Hash the full groups `start_parent..full_parents` of `child` into
+    /// `parent`, batching eligible runs through [`Hasher::hash_many_into`].
+    #[inline]
+    fn _batch_full_groups(
+        child: &ChunkedLevel,
+        parent: &mut ChunkedLevel,
+        start_parent: usize,
+        full_parents: usize,
+        hasher: &H,
+    ) {
+        /// Parents gathered per `hash_many_into` call. The Blake3 override
+        /// re-splits this into `simd_degree`-sized SIMD calls internally.
+        const WINDOW: usize = 16;
+
+        let mut parent_idx = start_parent;
+        let mut refs: [&[Hash]; WINDOW] = [&[]; WINDOW];
+        let mut out: [Hash; WINDOW] = [[0u8; 32]; WINDOW];
+        while parent_idx < full_parents {
+            let take = (full_parents - parent_idx).min(WINDOW);
+            let mut filled = 0;
+            for slot in refs.iter_mut().take(take) {
+                let start = (parent_idx + filled) * N;
+                match child.group_slice(start, N) {
+                    Some(g) => *slot = g,
+                    // Group straddles a boundary (cannot happen for eligible N
+                    // since CHUNK_SIZE % N == 0, but stay correct anyway):
+                    // stop the window here and let the scalar tail finish it.
+                    None => break,
+                }
+                filled += 1;
+            }
+            if filled == 0 {
+                // Could not borrow even one group contiguously; scalar.
+                let p = hasher.hash_children(
+                    &Self::_copy_group(child, parent_idx),
+                );
+                parent.set_preallocated(parent_idx, p);
+                parent_idx += 1;
+                continue;
+            }
+            hasher.hash_many_into(&refs[..filled], &mut out[..filled]);
+            for (i, &h) in out[..filled].iter().enumerate() {
+                parent.set_preallocated(parent_idx + i, h);
+            }
+            parent_idx += filled;
+        }
+    }
+
+    /// Copy a full N-child group into a stack buffer (boundary-straddling
+    /// fallback for `_batch_full_groups`).
+    #[inline]
+    fn _copy_group(child: &ChunkedLevel, parent_idx: usize) -> [Hash; N] {
+        let mut buf = [[0u8; 32]; N];
+        child.get_group(parent_idx * N, N, &mut buf);
+        buf
     }
 
     pub(crate) fn _insert_many(

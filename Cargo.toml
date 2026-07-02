@@ -21,7 +21,13 @@ docs = ["dep:include-utils"]
 serde = ["dep:serde", "dep:serde_with"]
 
 [dependencies]
-blake3 = { version = "1", default-features = false, optional = true }
+# Pinned exactly: the SIMD batch parent-hashing path (src/adapters/blake3.rs)
+# drives the #[doc(hidden)] blake3::platform::Platform::hash_many API with
+# hardcoded IV + flag constants, and relies on its single-chunk output being
+# byte-identical to blake3::hash. That contract is not part of blake3's stable
+# surface, so a minor bump could silently change it. The byte-identity unit
+# test guards behavior; this pin guards the API.
+blake3 = { version = "=1.8.5", default-features = false, optional = true }
 wincode = { version = "0.4", default-features = false, features = ["alloc", "derive"], optional = true }
 parking_lot = { version = "0.12", optional = true }
 arc-swap = { version = "1", optional = true }

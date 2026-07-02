@@ -236,6 +236,30 @@ impl ChunkedLevel {
         }
     }
 
+    /// Borrow a contiguous group of `count` hashes starting at `start`,
+    /// when it lies wholly within a single chunk or the tail.
+    ///
+    /// Returns `None` if the group straddles a chunk/tail boundary, in which
+    /// case the caller must fall back to a copying read. For the batched
+    /// parent path, full groups of arity N in {2,4,8,16} are chunk-aligned
+    /// (`CHUNK_SIZE % N == 0`), so this always returns `Some`.
+    #[inline]
+    pub(crate) fn group_slice(&self, start: usize, count: usize) -> Option<&[Hash]> {
+        if start + count > self.len {
+            return None;
+        }
+        let chunk_idx = start / CHUNK_SIZE;
+        let offset = start % CHUNK_SIZE;
+        if offset + count > CHUNK_SIZE {
+            return None;
+        }
+        if chunk_idx < self.chunk_count() {
+            Some(&self.chunk_slice(chunk_idx)[offset..offset + count])
+        } else {
+            Some(&self.tail[offset..offset + count])
+        }
+    }
+
     /// Write a hash at the given index
     #[inline]
     pub(crate) fn set(&mut self, index: usize, value: Hash) -> Result<(), TreeError> {
