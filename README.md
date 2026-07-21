@@ -1,3 +1,6 @@
+> [!WARNING]
+> This repository will not be maintained further. Future developments will live in https://github.com/ethsystems/mono
+
 # rotortree ~ nullifier databases done right*
 
 <p align="center">
